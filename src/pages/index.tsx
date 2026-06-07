@@ -151,7 +151,8 @@ function CircularProgress({ progress, color, testID }: CircularProgressProps) {
   const clampedProgress = Math.min(1, Math.max(0, progress));
   const degrees = clampedProgress * 360;
   const inner = RING_SIZE - RING_STROKE * 2;
-  const gray = '#F2F4F6';
+  // 트랙(미완료 부분) 색 — 진행 컬러의 옅은 톤으로 같은 계열 통일 → 잘려보이지 않게
+  const track = '#FFE5E5';
   const isComplete = clampedProgress >= 1;
 
   return (
@@ -190,8 +191,8 @@ function CircularProgress({ progress, color, testID }: CircularProgressProps) {
                 height: RING_SIZE,
                 borderRadius: RING_SIZE / 2,
                 borderWidth: RING_STROKE,
-                borderTopColor: gray,
-                borderRightColor: gray,
+                borderTopColor: track,
+                borderRightColor: track,
                 borderBottomColor: 'transparent',
                 borderLeftColor: 'transparent',
                 transform: [{ rotate: `${Math.min(degrees, 180)}deg` }],
@@ -221,8 +222,8 @@ function CircularProgress({ progress, color, testID }: CircularProgressProps) {
                 borderWidth: RING_STROKE,
                 borderTopColor: 'transparent',
                 borderRightColor: 'transparent',
-                borderBottomColor: gray,
-                borderLeftColor: gray,
+                borderBottomColor: track,
+                borderLeftColor: track,
                 transform: [{ rotate: `${Math.max(0, degrees - 180)}deg` }],
               }}
             />
