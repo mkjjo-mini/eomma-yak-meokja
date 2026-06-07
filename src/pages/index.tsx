@@ -247,6 +247,8 @@ function HomePage() {
   const [familyStatus, setFamilyStatus] = useState<CareStatusEntry | null>(null);
   const [isFamilyLoading, setIsFamilyLoading] = useState(false);
   const [dropdownVisible, setDropdownVisible] = useState(false);
+  // 페어링 허브 모달 (헤더 가족 아이콘 탭 시 분기 — 역할 미리 고정 X)
+  const [familyHubVisible, setFamilyHubVisible] = useState(false);
 
   const isFamilyMode = viewerMode.kind === 'family';
 
@@ -905,13 +907,13 @@ function HomePage() {
             )}
           </TouchableOpacity>
 
-          {/* 가족 아이콘 버튼 → /family/share */}
-          {/* Ref: PRD step-08-family.md §처리 2 "헤더 우측 또는 적절한 위치에 '가족' 아이콘/링크" */}
+          {/* 가족 아이콘 버튼 → 페어링 허브 모달 (역할 분기) */}
+          {/* 한 사람이 케어 대상이자 케어러일 수 있으므로 진입 시점에 사용자가 선택 */}
           <TouchableOpacity
             style={styles.badgeButton}
-            onPress={() => navigation.navigate('/family/share')}
+            onPress={() => setFamilyHubVisible(true)}
             accessibilityRole="button"
-            accessibilityLabel="가족에게 알리기"
+            accessibilityLabel="가족과 공유하기"
             testID="family-nav-button"
           >
             <Text style={styles.badgeButtonEmoji}>👨‍👩‍👧</Text>
@@ -1287,6 +1289,79 @@ function HomePage() {
                     </View>
                   );
                 })}
+              </View>
+            </TouchableWithoutFeedback>
+          </View>
+        </TouchableWithoutFeedback>
+      </Modal>
+
+      {/* ── 페어링 허브 모달 (역할 분기) ── */}
+      {/* 한 사람이 케어 대상이자 케어러일 수 있으므로 진입 시점에 사용자가 선택 */}
+      <Modal
+        visible={familyHubVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setFamilyHubVisible(false)}
+        testID="family-hub-modal"
+      >
+        <TouchableWithoutFeedback onPress={() => setFamilyHubVisible(false)}>
+          <View style={styles.menuOverlay}>
+            <TouchableWithoutFeedback>
+              <View style={styles.familyHubSheet} testID="family-hub-sheet">
+                <Text style={styles.familyHubTitle}>가족과 공유하기</Text>
+                <Text style={styles.familyHubSubtitle}>
+                  {'내 복약을 알릴 수도, 가족을 챙길 수도 있어요.\n어떤 걸 하실래요?'}
+                </Text>
+
+                <TouchableOpacity
+                  style={styles.familyHubItem}
+                  onPress={() => {
+                    setFamilyHubVisible(false);
+                    navigation.navigate('/family/share');
+                  }}
+                  accessibilityRole="button"
+                  accessibilityLabel="내 복약 상태 가족에게 알리기"
+                  testID="family-hub-share"
+                >
+                  <Text style={styles.familyHubItemEmoji}>📤</Text>
+                  <View style={styles.familyHubItemText}>
+                    <Text style={styles.familyHubItemTitle}>내 복약 상태 알리기</Text>
+                    <Text style={styles.familyHubItemDesc}>
+                      가족이 내 약 챙기시는지 볼 수 있어요
+                    </Text>
+                  </View>
+                  <Text style={styles.familyHubItemArrow}>›</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={styles.familyHubItem}
+                  onPress={() => {
+                    setFamilyHubVisible(false);
+                    navigation.navigate('/family/connect');
+                  }}
+                  accessibilityRole="button"
+                  accessibilityLabel="가족 코드 입력해서 챙기기"
+                  testID="family-hub-connect"
+                >
+                  <Text style={styles.familyHubItemEmoji}>📥</Text>
+                  <View style={styles.familyHubItemText}>
+                    <Text style={styles.familyHubItemTitle}>가족 코드 입력하기</Text>
+                    <Text style={styles.familyHubItemDesc}>
+                      소중한 사람 복약을 챙겨요
+                    </Text>
+                  </View>
+                  <Text style={styles.familyHubItemArrow}>›</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={styles.familyHubClose}
+                  onPress={() => setFamilyHubVisible(false)}
+                  accessibilityRole="button"
+                  accessibilityLabel="닫기"
+                  testID="family-hub-close"
+                >
+                  <Text style={styles.familyHubCloseText}>닫기</Text>
+                </TouchableOpacity>
               </View>
             </TouchableWithoutFeedback>
           </View>
@@ -2443,5 +2518,70 @@ const styles = StyleSheet.create({
   familyStatusBadgeMissed: {
     backgroundColor: '#FFF3E0',
     color: '#FF9F40',
+  },
+  // ─── 페어링 허브 모달 ───────────────────────────────────────────
+  familyHubSheet: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    paddingVertical: 20,
+    paddingHorizontal: 16,
+    marginHorizontal: 24,
+    gap: 14,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.18,
+    shadowRadius: 16,
+    elevation: 8,
+  },
+  familyHubTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#191F28',
+    textAlign: 'center',
+  },
+  familyHubSubtitle: {
+    fontSize: 13,
+    color: '#6B7684',
+    textAlign: 'center',
+    lineHeight: 18,
+  },
+  familyHubItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FFF8F8',
+    borderRadius: 12,
+    paddingVertical: 14,
+    paddingHorizontal: 14,
+    gap: 12,
+  },
+  familyHubItemEmoji: {
+    fontSize: 26,
+  },
+  familyHubItemText: {
+    flex: 1,
+    gap: 2,
+  },
+  familyHubItemTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#191F28',
+  },
+  familyHubItemDesc: {
+    fontSize: 13,
+    color: '#6B7684',
+  },
+  familyHubItemArrow: {
+    fontSize: 22,
+    color: '#B0B8C1',
+    fontWeight: '300',
+  },
+  familyHubClose: {
+    alignItems: 'center',
+    paddingVertical: 12,
+  },
+  familyHubCloseText: {
+    fontSize: 15,
+    color: '#6B7684',
+    fontWeight: '500',
   },
 });

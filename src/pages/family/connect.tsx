@@ -241,13 +241,14 @@ function FamilyConnectPage() {
 
         {/* ── 상세 안내 카드 ── */}
         <View style={styles.guideCard}>
-          <Text style={styles.guideTitle}>소중한 사람 복약 챙기기</Text>
+          <Text style={styles.guideTitle}>가족 복약 챙기기</Text>
           <Text style={styles.guideCardBody}>
             {'멀리 있어도 매일 약 챙기시는지 확인할 수 있어요.\n\n'}
             {'• 가족 앱에서 만든 6자리 코드를 받아 아래에 입력해요\n'}
             {'• 가족의 오늘 복약 상태가 내 앱 홈 화면에 표시돼요\n'}
             {'• 회차 추가·수정·체크는 가족 본인 폰에서만 할 수 있어요\n\n'}
-            {'가족 1명까지는 무료예요. 2명째부터는 4,900원으로 슬롯을 추가할 수 있어요.'}
+            {'가족 1명까지는 무료예요. 2명째부터는 4,900원으로 슬롯을 추가할 수 있어요.\n\n'}
+            {'반대로 내 복약을 가족에게 알리고 싶다면, 홈에서 👨‍👩‍👧 → "내 복약 상태 알리기"로 시작해요.'}
           </Text>
         </View>
 
