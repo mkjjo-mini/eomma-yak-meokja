@@ -865,6 +865,28 @@ function HomePage() {
           )}
           ListFooterComponent={
             <>
+              {/* ── 광고 제거 구독 홍보 슬롯 (미구독자만 노출) ── */}
+              {/* 회차 카드와 같은 형태로 자연스럽게 발견되도록 리스트 끝에 고정 */}
+              {showRemoveAds && (
+                <TouchableOpacity
+                  style={styles.promoCard}
+                  onPress={() => setRemoveAdsSheetVisible(true)}
+                  accessibilityRole="button"
+                  accessibilityLabel="광고 없이 쓰기 구독 안내 열기"
+                  testID="promo-card-remove-ads"
+                >
+                  <View style={styles.promoColorStripe} />
+                  <View style={styles.promoThumbnail}>
+                    <Text style={styles.promoThumbnailEmoji}>✨</Text>
+                  </View>
+                  <View style={styles.promoBody}>
+                    <Text style={styles.promoLabel}>광고 없이 쓰기</Text>
+                    <Text style={styles.promoSubtext}>월 1,900원으로 광고 제거</Text>
+                  </View>
+                  <Text style={styles.promoArrow}>›</Text>
+                </TouchableOpacity>
+              )}
+
               {/* ── Step 6: 이번 달 복약률 카드 ── */}
               {/* Ref: PRD step-06 §출력 "홈 하단 이번 달 복약률 원형 그래프" */}
               <AdherenceCard
@@ -1990,5 +2012,55 @@ const styles = StyleSheet.create({
     fontSize: 17,
     fontWeight: '700',
     color: '#FFFFFF',
+  },
+  // ─── 광고 제거 구독 홍보 슬롯 카드 (회차 카드와 동일 형태, 살짝 다른 톤) ──
+  promoCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FFF5F7',
+    borderRadius: 14,
+    marginBottom: 10,
+    overflow: 'hidden',
+    minHeight: 72,
+    borderWidth: 1,
+    borderColor: '#FFE5E5',
+  },
+  promoColorStripe: {
+    width: 6,
+    alignSelf: 'stretch',
+    backgroundColor: '#FF6B6B',
+  },
+  promoThumbnail: {
+    marginLeft: 12,
+    marginRight: 12,
+    width: 48,
+    height: 48,
+    borderRadius: 10,
+    backgroundColor: '#FFE5E5',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  promoThumbnailEmoji: {
+    fontSize: 24,
+  },
+  promoBody: {
+    flex: 1,
+    paddingVertical: 14,
+    gap: 3,
+  },
+  promoLabel: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#191F28',
+  },
+  promoSubtext: {
+    fontSize: 13,
+    color: '#6B7684',
+  },
+  promoArrow: {
+    fontSize: 24,
+    color: '#FF6B6B',
+    marginRight: 16,
+    fontWeight: '300',
   },
 });
