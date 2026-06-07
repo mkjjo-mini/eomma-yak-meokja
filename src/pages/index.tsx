@@ -710,10 +710,23 @@ function HomePage() {
     setAdFailed(false);
   }
 
-  function handleAdFailed(payload?: unknown) {
-    // 배너 로드 실패 시 빈 공간 없이 카드만 표시
-    // Ref: step-03 §검수 "배너 광고 로드 실패 시 빈 공간 없이 카드 리스트만 표시"
-    console.log('[DIAG] onAdFailed (onNoFill or onAdFailedToRender)', payload);
+  function handleAdNoFill(payload?: unknown) {
+    const err = (payload as { error?: { code?: number; message?: string; domain?: string } })?.error;
+    console.warn('[DIAG] onNoFill — 광고 재고 없음', {
+      code: err?.code,
+      message: err?.message,
+      domain: err?.domain,
+    });
+    setAdFailed(true);
+  }
+
+  function handleAdFailedToRender(payload?: unknown) {
+    const err = (payload as { error?: { code?: number; message?: string; domain?: string } })?.error;
+    console.error('[DIAG] onAdFailedToRender — SDK 미지원/렌더 실패', {
+      code: err?.code,
+      message: err?.message,
+      domain: err?.domain,
+    });
     setAdFailed(true);
   }
 
@@ -910,8 +923,8 @@ function HomePage() {
                 tone="blackAndWhite"
                 variant="expanded"
                 onAdRendered={handleAdRendered}
-                onNoFill={handleAdFailed}
-                onAdFailedToRender={handleAdFailed}
+                onNoFill={handleAdNoFill}
+                onAdFailedToRender={handleAdFailedToRender}
               />
             </AdErrorBoundary>
           </View>
