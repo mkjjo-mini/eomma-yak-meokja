@@ -128,10 +128,13 @@ type RoutineWithRecord = {
 
 // 아이콘 이모지 매핑은 types/routine.ts로 이동 (약 단위 색상·종류 부여로 공유 필요)
 
-// ─── 원형 프로그레스 컴포넌트 (SVG-free) ─────────────────────────────────────
-// border-radius 트릭: 반원 2개를 절대 위치로 겹쳐 원형 프로그레스 구현
+// ─── 원형 프로그레스 컴포넌트 (SVG 기반) ────────────────────────────────────
+// react-native-svg의 Circle + strokeDasharray 트릭으로 깔끔한 호 렌더링.
+// 이전엔 border-radius + rotation 마스크 방식이었으나, 회전 경계에 시각적 잘림
+// 현상이 있어 SVG로 전환 (회전 transform 없이 매끄러운 호).
 // Ref: PRD step-06 §출력 "원형 프로그레스 UI 표시"
-// Lottie 미도입: 라이브러리 추가 부담 최소화 원칙 준수
+
+import Svg, { Circle } from 'react-native-svg';
 
 const RING_SIZE = 80;
 const RING_STROKE = 8;
@@ -145,110 +148,54 @@ type CircularProgressProps = {
 };
 
 function CircularProgress({ progress, color, testID }: CircularProgressProps) {
-  // Gray-cover reveal 방식: 컬러 링 위에 회색 반원 마스크가 회전하며 벗겨짐.
-  // 우측 마스크(TOP+RIGHT=gray) → 0~180° 구간 노출
-  // 좌측 마스크(BOTTOM+LEFT=gray) → 180~360° 구간 노출
-  // 100%: 마스크 제거 — 좌측 마스크 180° 회전 시 12시 방향 잔상 방지
   const clampedProgress = Math.min(1, Math.max(0, progress));
-  const degrees = clampedProgress * 360;
-  const inner = RING_SIZE - RING_STROKE * 2;
-  // 트랙(미완료 부분) 색 — 진행 컬러의 옅은 톤으로 같은 계열 통일 → 잘려보이지 않게
+  const radius = (RING_SIZE - RING_STROKE) / 2;
+  const circumference = 2 * Math.PI * radius;
+  const offset = circumference * (1 - clampedProgress);
+  const center = RING_SIZE / 2;
+  // 트랙(미완료 부분) 색 — 진행 컬러와 같은 계열 옅은 톤
   const track = '#FFE5E5';
-  const isComplete = clampedProgress >= 1;
 
   return (
-    <View style={{ width: RING_SIZE, height: RING_SIZE }} testID={testID}>
-      {/* 전체 컬러 링 (아래 레이어) */}
-      <View
-        style={{
-          position: 'absolute',
-          width: RING_SIZE,
-          height: RING_SIZE,
-          borderRadius: RING_SIZE / 2,
-          borderWidth: RING_STROKE,
-          borderColor: color,
-        }}
-      />
-
-      {!isComplete && (
-        <>
-          {/* 우측 회색 마스크 — 시계방향 회전으로 우측 절반 노출 */}
-          <View
-            style={{
-              position: 'absolute',
-              right: 0,
-              top: 0,
-              width: RING_SIZE / 2,
-              height: RING_SIZE,
-              overflow: 'hidden',
-            }}
-          >
-            <View
-              style={{
-                position: 'absolute',
-                right: 0,
-                top: 0,
-                width: RING_SIZE,
-                height: RING_SIZE,
-                borderRadius: RING_SIZE / 2,
-                borderWidth: RING_STROKE,
-                borderTopColor: track,
-                borderRightColor: track,
-                borderBottomColor: 'transparent',
-                borderLeftColor: 'transparent',
-                transform: [{ rotate: `${Math.min(degrees, 180)}deg` }],
-              }}
-            />
-          </View>
-
-          {/* 좌측 회색 마스크 — 180° 이후 좌측 절반 노출 */}
-          <View
-            style={{
-              position: 'absolute',
-              left: 0,
-              top: 0,
-              width: RING_SIZE / 2,
-              height: RING_SIZE,
-              overflow: 'hidden',
-            }}
-          >
-            <View
-              style={{
-                position: 'absolute',
-                left: 0,
-                top: 0,
-                width: RING_SIZE,
-                height: RING_SIZE,
-                borderRadius: RING_SIZE / 2,
-                borderWidth: RING_STROKE,
-                borderTopColor: 'transparent',
-                borderRightColor: 'transparent',
-                borderBottomColor: track,
-                borderLeftColor: track,
-                transform: [{ rotate: `${Math.max(0, degrees - 180)}deg` }],
-              }}
-            />
-          </View>
-        </>
-      )}
-
-      {/* 흰색 내부 원 (도넛 구멍) */}
-      <View
-        style={{
-          position: 'absolute',
-          top: RING_STROKE,
-          left: RING_STROKE,
-          width: inner,
-          height: inner,
-          borderRadius: inner / 2,
-          backgroundColor: '#FFFFFF',
-          alignItems: 'center',
-          justifyContent: 'center',
-        }}
+    <View
+      style={{
+        width: RING_SIZE,
+        height: RING_SIZE,
+        alignItems: 'center',
+        justifyContent: 'center',
+      }}
+      testID={testID}
+    >
+      <Svg
+        width={RING_SIZE}
+        height={RING_SIZE}
+        style={{ position: 'absolute', top: 0, left: 0 }}
       >
-        <Text style={styles.ringPercent}>{Math.round(clampedProgress * 100)}</Text>
-        <Text style={styles.ringPercentSign}>%</Text>
-      </View>
+        {/* 트랙 (전체 원) */}
+        <Circle
+          cx={center}
+          cy={center}
+          r={radius}
+          stroke={track}
+          strokeWidth={RING_STROKE}
+          fill="none"
+        />
+        {/* 진행 호 — 12시에서 시작해 시계 방향 */}
+        <Circle
+          cx={center}
+          cy={center}
+          r={radius}
+          stroke={color}
+          strokeWidth={RING_STROKE}
+          fill="none"
+          strokeDasharray={`${circumference} ${circumference}`}
+          strokeDashoffset={offset}
+          strokeLinecap="round"
+          transform={`rotate(-90 ${center} ${center})`}
+        />
+      </Svg>
+      <Text style={styles.ringPercent}>{Math.round(clampedProgress * 100)}</Text>
+      <Text style={styles.ringPercentSign}>%</Text>
     </View>
   );
 }
