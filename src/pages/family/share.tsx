@@ -1,0 +1,701 @@
+/**
+ * /family/share — 페어링 코드 생성 화면 (케어 대상 폰)
+ *
+ * Ref:
+ *  - PRD: products/eomma-yak-meokja/prd/v1-steps/step-08-family.md §처리 2, 5
+ *  - references/sdk/framework/화면이동/routing.md §createRoute, useNavigation
+ *  - references/dev-guide/design/consumer-ux-guide.md §다크패턴 5종 방지
+ *    "거절 선택지 있음, 강제 팝업 없음, CTA 라벨 명확"
+ *  - references/dev-guide/design/ux-writing.md §해요체·능동형·긍정형
+ *  - references/sdk/framework/공유/share.md (카카오톡 공유)
+ *
+ * 다크패턴 체크:
+ *  [v] 진입 즉시 전면 바텀시트 없음
+ *  [v] 뒤로가기 차단 없음 (onRequestClose 처리)
+ *  [v] 거절 선택지 있음 (닫기·연결 해제)
+ *  [v] 예상치 못한 광고 없음
+ *  [v] CTA 라벨 명확 ("코드 생성하기", "코드 다시 만들기")
+ *
+ * 2명째 페어링 시도 시점은 8a에선 그냥 허용 — 가족 확장 IAP 게이팅은 8b에서 추가.
+ * Ref: step-08-family.md §범위 밖 "8b로"
+ */
+import { createRoute, useNavigation } from '@granite-js/react-native';
+import { share } from '@apps-in-toss/framework';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import {
+  ActivityIndicator,
+  Modal,
+  Platform,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  TouchableWithoutFeedback,
+  View,
+} from 'react-native';
+import {
+  generatePairingCode,
+  getPairings,
+  unpair,
+} from '../../services/pairService';
+import type { PairingRecord } from '../../types/pair';
+import { getNickname } from '../../services/storageService';
+import { ensureUserKey } from '../../services/authService';
+import {
+  getFamilySlots,
+  purchaseFamilyExpansion,
+} from '../../services/iapService';
+import { RefundNoticeBottomSheet } from '../../components/RefundNoticeBottomSheet';
+
+export const Route = createRoute('/family/share', {
+  validateParams: (params) => params,
+  component: FamilySharePage,
+});
+
+// ─── 카운트다운 훅 ──────────────────────────────────────────────────────────
+
+function useCountdown(expiresAt: string | null): string {
+  const [remaining, setRemaining] = useState('');
+
+  useEffect(() => {
+    if (!expiresAt) {
+      setRemaining('');
+      return;
+    }
+
+    function update() {
+      const diff = new Date(expiresAt!).getTime() - Date.now();
+      if (diff <= 0) {
+        setRemaining('만료됐어요');
+        return;
+      }
+      const totalSecs = Math.floor(diff / 1000);
+      const m = Math.floor(totalSecs / 60);
+      const s = totalSecs % 60;
+      setRemaining(`${m}분 ${String(s).padStart(2, '0')}초 남았어요`);
+    }
+
+    update();
+    const interval = setInterval(update, 1000);
+    return () => clearInterval(interval);
+  }, [expiresAt]);
+
+  return remaining;
+}
+
+// ─── 메인 화면 ────────────────────────────────────────────────────────────────
+
+function FamilySharePage() {
+  const navigation = useNavigation();
+
+  const [nickname, setNickname] = useState('');
+  const [code, setCode] = useState<string | null>(null);
+  const [expiresAt, setExpiresAt] = useState<string | null>(null);
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [errorMessage, setErrorMessage] = useState('');
+  const [pairings, setPairings] = useState<PairingRecord[]>([]);
+
+  // 연결 해제 확인 모달
+  const [unpairTarget, setUnpairTarget] = useState<PairingRecord | null>(null);
+  const [unpairConfirmVisible, setUnpairConfirmVisible] = useState(false);
+
+  // ─── Step 8b: 가족 슬롯 IAP (누적 per-slot 모델) ───────────────────────────
+  // Ref: PRD step-08-family.md §처리 7 — "결제마다 영구 슬롯 +1, 슬롯 내 무료 재연결"
+  // 슬롯 수 = 1(무료) + getCompletedOrRefundedOrders로 카운트한 COMPLETED 결제 수.
+  // 환불 시 REFUNDED 상태 자동 제외 → 슬롯 자동 차감.
+  const [familySlots, setFamilySlots] = useState(1);
+  const [familyExpansionSheetVisible, setFamilyExpansionSheetVisible] = useState(false);
+
+  // 토스트
+  const [toastMessage, setToastMessage] = useState('');
+  const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const countdown = useCountdown(expiresAt);
+  const isExpired = expiresAt !== null && new Date(expiresAt).getTime() <= Date.now();
+
+  useEffect(() => {
+    void loadData();
+  }, []);
+
+  async function loadData() {
+    await ensureUserKey();
+    // Step 8b: 가족 슬롯 카운트도 같이 로드 (토스 결제 이력 기반)
+    // Ref: PRD step-08-family.md §처리 7 (슬롯 모델)
+    const [nick, pairs, slots] = await Promise.all([
+      getNickname(),
+      getPairings(),
+      getFamilySlots(),
+    ]);
+    setNickname(nick ?? '');
+    setPairings(pairs);
+    setFamilySlots(slots);
+  }
+
+  function showToast(msg: string) {
+    setToastMessage(msg);
+    if (toastTimer.current) clearTimeout(toastTimer.current);
+    toastTimer.current = setTimeout(() => setToastMessage(''), 2500);
+  }
+
+  // ─── 코드 생성 ─────────────────────────────────────────────────────────────
+
+  // Step 8b: 가족 확장 IAP 게이팅 — 2명째부터 결제 필요
+  // Ref: PRD step-08-family.md §처리 7
+  // Ref: PRD step-08-family.md §검수 IAP ② "1명 무료, 2명째부터 결제"
+  const doGenerateCode = useCallback(async () => {
+    setIsGenerating(true);
+    setErrorMessage('');
+    try {
+      const result = await generatePairingCode();
+      setCode(result.code);
+      setExpiresAt(result.expiresAt);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : '알 수 없는 오류';
+      setErrorMessage(`코드를 만들지 못했어요: ${msg}`);
+    } finally {
+      setIsGenerating(false);
+    }
+  }, []);
+
+  const handleGenerateCode = useCallback(async () => {
+    // 슬롯 게이팅: 활성 연결 수가 슬롯 한도에 도달했으면 결제 바텀시트.
+    // 연결 끊겼다 다시 연결은 무료 (슬롯 내 회전). 결제는 슬롯 자체를 사는 것.
+    // Ref: PRD step-08-family.md §처리 7 (슬롯 모델)
+    if (pairings.length >= familySlots) {
+      setFamilyExpansionSheetVisible(true);
+      return;
+    }
+    await doGenerateCode();
+  }, [pairings.length, familySlots, doGenerateCode]);
+
+  // 가족 슬롯 추가 결제 핸들러 (일회성, 영구)
+  // Ref: PRD step-08-family.md §처리 7 — 슬롯 +1 후 즉시 코드 생성 진행
+  const handleFamilyExpansionPurchase = useCallback(async () => {
+    setFamilyExpansionSheetVisible(false);
+    try {
+      const result = await purchaseFamilyExpansion();
+      if (result.kind === 'success') {
+        // 결제 성공: 슬롯 카운트 토스 서버에서 재조회 + 코드 생성 진행
+        const updatedSlots = await getFamilySlots();
+        setFamilySlots(updatedSlots);
+        showToast('가족 슬롯이 추가됐어요');
+        await doGenerateCode();
+      } else if (result.kind === 'cancelled') {
+        // 취소: silent — 코드 생성 차단 (현재 슬롯 한도 유지)
+      } else {
+        // 실패: 에러 안내
+        const msg =
+          result.reason === 'unsupported_version'
+            ? '토스 앱을 최신 버전으로 업데이트해야 이용할 수 있어요'
+            : '결제에 실패했어요. 다시 시도해 주세요';
+        showToast(msg);
+      }
+    } catch {
+      showToast('결제에 실패했어요. 다시 시도해 주세요');
+    }
+  }, [doGenerateCode]);
+
+  // ─── 카카오톡 공유 ─────────────────────────────────────────────────────────
+  // Ref: references/sdk/framework/공유/share.md
+
+  const handleShare = useCallback(async () => {
+    if (!code) return;
+    // Ref: references/sdk/framework/공유/share.md §시그니처
+    // function share(message: { message: string }): Promise<void>
+    // title·description·url 파라미터 없음 — message 단일 필드만 지원
+    try {
+      await share({
+        message: `[엄마약먹자] 가족 연결 코드: ${code.split('').join(' ')}\n5분 내에 입력해요`,
+      });
+    } catch {
+      showToast('공유하기를 이용할 수 없어요');
+    }
+  }, [code]);
+
+  // ─── 연결 해제 ─────────────────────────────────────────────────────────────
+
+  const handleUnpairConfirm = useCallback(async () => {
+    if (!unpairTarget) return;
+    setUnpairConfirmVisible(false);
+
+    try {
+      await unpair({
+        caregiverUserKey: unpairTarget.caregiverUserKey,
+        careRecipientUserKey: unpairTarget.careRecipientUserKey,
+      });
+      showToast('연결을 해제했어요');
+      void loadData();
+    } catch {
+      showToast('연결 해제에 실패했어요');
+    }
+
+    setUnpairTarget(null);
+  }, [unpairTarget]);
+
+  // ─── 코드 표시 (자리 분리) ─────────────────────────────────────────────────
+
+  function renderCode(c: string) {
+    return c.split('').join(' ');
+  }
+
+  // ─── 렌더 ────────────────────────────────────────────────────────────────
+
+  return (
+    <View style={styles.container}>
+      {/* ── 헤더 ── */}
+      {/* Ref: step-08-family.md §처리 2 "헤더: {별명}의 가족에게 알리기" */}
+      <View style={styles.header}>
+        <TouchableOpacity
+          style={styles.backButton}
+          onPress={() => {
+            if (navigation.canGoBack()) navigation.goBack();
+          }}
+          accessibilityRole="button"
+          accessibilityLabel="뒤로 가기"
+          testID="back-button"
+        >
+          <Text style={styles.backButtonText}>←</Text>
+        </TouchableOpacity>
+        <Text style={styles.headerTitle} accessibilityRole="header">
+          {nickname ? `${nickname}의 가족에게 알리기` : '가족에게 알리기'}
+        </Text>
+      </View>
+
+      <View style={styles.content}>
+        {/* ── 코드 영역 ── */}
+        <View style={styles.codeCard} testID="code-card">
+          {code && !isExpired ? (
+            <>
+              {/* 6자리 코드 표시 */}
+              {/* Ref: step-08-family.md §처리 2 "각 자리 띄움" */}
+              <Text style={styles.codeText} testID="pairing-code">
+                {renderCode(code)}
+              </Text>
+
+              {/* 카운트다운 */}
+              {/* Ref: step-08-family.md §처리 2 "5분 카운트다운 표시" */}
+              <Text style={styles.countdownText} testID="countdown-text">
+                {countdown}
+              </Text>
+
+              {/* 카카오톡 공유 버튼 */}
+              {/* Ref: step-08-family.md §처리 2 "카카오톡으로 공유 버튼" */}
+              <TouchableOpacity
+                style={styles.shareButton}
+                onPress={() => void handleShare()}
+                accessibilityRole="button"
+                accessibilityLabel="카카오톡으로 공유해요"
+                testID="share-button"
+              >
+                <Text style={styles.shareButtonText}>카카오톡으로 공유해요</Text>
+              </TouchableOpacity>
+            </>
+          ) : (
+            <>
+              <Text style={styles.codeEmptyText}>
+                {isExpired ? '코드가 만료됐어요' : '코드를 생성해요'}
+              </Text>
+
+              {/* 코드 생성/재생성 버튼 */}
+              {/* Ref: step-08-family.md §처리 2 "+ 코드 생성하기" / "코드 다시 만들기" */}
+              <TouchableOpacity
+                style={[styles.generateButton, isGenerating && styles.generateButtonDisabled]}
+                onPress={() => void handleGenerateCode()}
+                disabled={isGenerating}
+                accessibilityRole="button"
+                accessibilityLabel={isExpired ? '코드 다시 만들기' : '코드 생성하기'}
+                testID="generate-code-button"
+              >
+                {isGenerating ? (
+                  <ActivityIndicator color="#FFFFFF" size="small" />
+                ) : (
+                  <Text style={styles.generateButtonText}>
+                    {isExpired ? '코드 다시 만들기' : '+ 코드 생성하기'}
+                  </Text>
+                )}
+              </TouchableOpacity>
+            </>
+          )}
+
+          {/* 만료 후 재생성 버튼 */}
+          {code && isExpired && (
+            <TouchableOpacity
+              style={[styles.generateButton, isGenerating && styles.generateButtonDisabled]}
+              onPress={() => void handleGenerateCode()}
+              disabled={isGenerating}
+              accessibilityRole="button"
+              accessibilityLabel="코드 다시 만들기"
+              testID="regenerate-code-button"
+            >
+              {isGenerating ? (
+                <ActivityIndicator color="#FFFFFF" size="small" />
+              ) : (
+                <Text style={styles.generateButtonText}>코드 다시 만들기</Text>
+              )}
+            </TouchableOpacity>
+          )}
+
+          {errorMessage !== '' && (
+            <Text style={styles.errorText} testID="error-text">
+              {errorMessage}
+            </Text>
+          )}
+        </View>
+
+        {/* ── 안내 문구 ── */}
+        <View style={styles.guideCard}>
+          <Text style={styles.guideTitle}>이렇게 사용해요</Text>
+          <Text style={styles.guideText}>
+            {'1. 코드를 생성해서 가족에게 알려요\n'}
+            {'2. 가족이 토스 앱에서 "가족 코드 입력"으로 연결해요\n'}
+            {'3. 약을 드실 때마다 가족에게 알림이 가요'}
+          </Text>
+        </View>
+
+        {/* ── 연결된 가족 목록 ── */}
+        {/* Ref: step-08-family.md §처리 2 "이미 페어링된 케어러 목록 표시" */}
+        <View style={styles.pairingListCard} testID="pairing-list-card">
+          <Text style={styles.pairingListTitle} testID="pairing-list-header">
+            {`연결된 가족: ${pairings.length}명`}
+          </Text>
+
+          {pairings.length === 0 ? (
+            <Text style={styles.pairingEmptyText}>아직 연결된 가족이 없어요</Text>
+          ) : (
+            pairings.map((p) => (
+              <View key={p.caregiverUserKey} style={styles.pairingItem} testID={`pairing-item-${p.caregiverUserKey}`}>
+                <Text style={styles.pairingNickname}>
+                  {p.careRecipientNickname ?? '가족'}
+                </Text>
+                {/* 거절 선택지: 연결 해제 버튼 */}
+                {/* Ref: references/dev-guide/design/consumer-ux-guide.md §3 */}
+                <TouchableOpacity
+                  style={styles.unpairButton}
+                  onPress={() => {
+                    setUnpairTarget(p);
+                    setUnpairConfirmVisible(true);
+                  }}
+                  accessibilityRole="button"
+                  accessibilityLabel="연결 해제해요"
+                  testID={`unpair-button-${p.caregiverUserKey}`}
+                >
+                  <Text style={styles.unpairButtonText}>연결 해제</Text>
+                </TouchableOpacity>
+              </View>
+            ))
+          )}
+        </View>
+      </View>
+
+      {/* ── 연결 해제 확인 모달 ── */}
+      {/* Ref: references/dev-guide/design/ux-writing.md §다이얼로그 왼쪽 "닫기" */}
+      <Modal
+        visible={unpairConfirmVisible}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setUnpairConfirmVisible(false)}
+        testID="unpair-confirm-modal"
+      >
+        <TouchableWithoutFeedback onPress={() => setUnpairConfirmVisible(false)}>
+          <View style={styles.modalOverlay}>
+            <TouchableWithoutFeedback>
+              <View style={styles.modalSheet} testID="unpair-confirm-sheet">
+                <Text style={styles.modalTitle}>연결을 해제할까요?</Text>
+                <Text style={styles.modalBody}>
+                  해제하면 가족에게 복약 알림이 가지 않아요
+                </Text>
+                <View style={styles.modalButtons}>
+                  {/* 왼쪽: 닫기 */}
+                  <TouchableOpacity
+                    style={[styles.modalButton, styles.modalButtonClose]}
+                    onPress={() => setUnpairConfirmVisible(false)}
+                    accessibilityRole="button"
+                    testID="unpair-cancel-button"
+                  >
+                    <Text style={styles.modalButtonCloseText}>닫기</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.modalButton, styles.modalButtonConfirm]}
+                    onPress={() => void handleUnpairConfirm()}
+                    accessibilityRole="button"
+                    testID="unpair-confirm-button"
+                  >
+                    <Text style={styles.modalButtonConfirmText}>해제해요</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            </TouchableWithoutFeedback>
+          </View>
+        </TouchableWithoutFeedback>
+      </Modal>
+
+      {/* ── Step 8b: 가족 확장 IAP 바텀시트 ── */}
+      {/* Ref: PRD step-08-family.md §처리 7·8 — 환불 불가 고지 + 동의 체크박스 필수 */}
+      <RefundNoticeBottomSheet
+        visible={familyExpansionSheetVisible}
+        sku="family_expansion_lifetime_v1"
+        productName="가족 추가 연결"
+        price={4900}
+        onConfirm={handleFamilyExpansionPurchase}
+        onClose={() => setFamilyExpansionSheetVisible(false)}
+      />
+
+      {/* ── 토스트 ── */}
+      {toastMessage !== '' && (
+        <View style={styles.toast} pointerEvents="none" testID="toast">
+          <Text style={styles.toastText}>{toastMessage}</Text>
+        </View>
+      )}
+    </View>
+  );
+}
+
+// ─── 스타일 ──────────────────────────────────────────────────────────────────
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: '#F8F9FA',
+  },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FFFFFF',
+    paddingTop: Platform.OS === 'ios' ? 56 : 20,
+    paddingBottom: 16,
+    paddingHorizontal: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F2F4F6',
+    gap: 12,
+  },
+  backButton: {
+    width: 36,
+    height: 36,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  backButtonText: {
+    fontSize: 22,
+    color: '#191F28',
+  },
+  headerTitle: {
+    flex: 1,
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#191F28',
+  },
+  content: {
+    flex: 1,
+    padding: 16,
+    gap: 16,
+  },
+  // 코드 카드
+  codeCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    padding: 24,
+    alignItems: 'center',
+    gap: 16,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.06,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  codeText: {
+    fontSize: 42,
+    fontWeight: '800',
+    color: '#FF6B6B',
+    letterSpacing: 4,
+    textAlign: 'center',
+  },
+  countdownText: {
+    fontSize: 15,
+    color: '#6B7684',
+  },
+  codeEmptyText: {
+    fontSize: 16,
+    color: '#8B95A1',
+    textAlign: 'center',
+    paddingVertical: 8,
+  },
+  generateButton: {
+    backgroundColor: '#FF6B6B',
+    borderRadius: 12,
+    paddingVertical: 14,
+    paddingHorizontal: 32,
+    minHeight: 52,
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: '100%',
+  },
+  generateButtonDisabled: {
+    opacity: 0.6,
+  },
+  generateButtonText: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#FFFFFF',
+  },
+  shareButton: {
+    backgroundColor: '#F8F9FA',
+    borderRadius: 12,
+    paddingVertical: 14,
+    paddingHorizontal: 24,
+    minHeight: 52,
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: '100%',
+    borderWidth: 1,
+    borderColor: '#E5E8EB',
+  },
+  shareButtonText: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#4E5968',
+  },
+  errorText: {
+    fontSize: 13,
+    color: '#FF6B6B',
+    textAlign: 'center',
+  },
+  // 안내 카드
+  guideCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    padding: 20,
+    gap: 8,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.06,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  guideTitle: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#191F28',
+  },
+  guideText: {
+    fontSize: 14,
+    color: '#6B7684',
+    lineHeight: 22,
+  },
+  // 연결된 가족 목록
+  pairingListCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    padding: 20,
+    gap: 12,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.06,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  pairingListTitle: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#191F28',
+  },
+  pairingEmptyText: {
+    fontSize: 14,
+    color: '#8B95A1',
+  },
+  pairingItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 8,
+    borderTopWidth: 1,
+    borderTopColor: '#F2F4F6',
+  },
+  pairingNickname: {
+    fontSize: 15,
+    color: '#191F28',
+    fontWeight: '500',
+  },
+  unpairButton: {
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+    backgroundColor: '#F2F4F6',
+    minHeight: 36,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  unpairButtonText: {
+    fontSize: 13,
+    color: '#4E5968',
+    fontWeight: '500',
+  },
+  // 모달
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.45)',
+    justifyContent: 'flex-end',
+  },
+  modalSheet: {
+    backgroundColor: '#FFFFFF',
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    paddingTop: 28,
+    paddingHorizontal: 24,
+    paddingBottom: Platform.OS === 'ios' ? 40 : 28,
+  },
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#191F28',
+    marginBottom: 8,
+  },
+  modalBody: {
+    fontSize: 15,
+    color: '#6B7684',
+    marginBottom: 28,
+  },
+  modalButtons: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  modalButton: {
+    flex: 1,
+    height: 52,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  modalButtonClose: {
+    backgroundColor: '#F2F4F6',
+  },
+  modalButtonConfirm: {
+    backgroundColor: '#FF6B6B',
+  },
+  modalButtonCloseText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#4E5968',
+  },
+  modalButtonConfirmText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#FFFFFF',
+  },
+  // 토스트
+  toast: {
+    position: 'absolute',
+    bottom: 80,
+    left: 24,
+    right: 24,
+    backgroundColor: 'rgba(25,31,40,0.88)',
+    borderRadius: 10,
+    paddingVertical: 14,
+    paddingHorizontal: 20,
+    alignItems: 'center',
+    zIndex: 20,
+  },
+  toastText: {
+    fontSize: 15,
+    color: '#FFFFFF',
+    fontWeight: '500',
+  },
+});
