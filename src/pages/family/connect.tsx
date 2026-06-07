@@ -239,7 +239,18 @@ function FamilyConnectPage() {
           </View>
         )}
 
-        {/* ── 안내 문구 ── */}
+        {/* ── 상세 안내 카드 ── */}
+        <View style={styles.guideCard}>
+          <Text style={styles.guideTitle}>소중한 사람 복약 챙기기</Text>
+          <Text style={styles.guideCardBody}>
+            {'멀리 있어도 매일 약 챙기시는지 확인할 수 있어요.\n\n'}
+            {'• 가족 앱에서 만든 6자리 코드를 받아 아래에 입력해요\n'}
+            {'• 가족의 오늘 복약 상태가 내 앱 홈 화면에 표시돼요\n'}
+            {'• 회차 추가·수정·체크는 가족 본인 폰에서만 할 수 있어요\n\n'}
+            {'가족 1명까지는 무료예요. 2명째부터는 4,900원으로 슬롯을 추가할 수 있어요.'}
+          </Text>
+        </View>
+
         <Text style={styles.guideText}>
           {'가족이 보내준 6자리 코드를 입력해요'}
         </Text>
@@ -369,6 +380,29 @@ const styles = StyleSheet.create({
     color: '#4E5968',
     textAlign: 'center',
     lineHeight: 24,
+  },
+  // 상세 안내 카드
+  guideCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    padding: 20,
+    gap: 10,
+    marginBottom: 8,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.06,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  guideTitle: {
+    fontSize: 17,
+    fontWeight: '700',
+    color: '#191F28',
+  },
+  guideCardBody: {
+    fontSize: 14,
+    color: '#6B7684',
+    lineHeight: 22,
   },
   // 코드 박스
   codeBoxRow: {
