@@ -179,23 +179,20 @@ describe('[여정 4] 케어 대상 → 케어러 페어링 → notifyCaregivers 
     expect(pairings[0]?.caregiverUserKey).toBe(CAREGIVER_KEY);
     expect(pairings[0]?.careRecipientNickname).toBe('엄마');
 
-    // 6. 케어 대상 폰으로 다시 전환 — notifyCaregivers fire-and-forget
+    // 6. 케어 대상 폰으로 다시 전환 — v1엔 알림 비활성 (NOTIFY_ENABLED=false)
+    // Ref: src/services/pairService.ts NOTIFY_ENABLED + 메모리 "엄마약먹자 알림 기능 보류"
+    // notifyCaregivers는 호출돼도 silent skip. 가족 현황은 Pull 방식(/api/care-status)으로 전달.
     storageStore[SCHEDULE_STORAGE_KEYS.USER_KEY] = CARE_RECIPIENT_KEY;
-
-    mockFetch.mockResolvedValueOnce({
-      ok: true,
-      json: () => Promise.resolve({ ok: true, sent: 1 }),
-    });
 
     await expect(
       notifyCaregivers('아침약', new Date().toISOString(), 'checked'),
     ).resolves.not.toThrow();
 
-    // /api/notify 호출 검증
+    // v1: /api/notify 호출 안 됨
     const notifyCall = mockFetch.mock.calls.find(
       ([url]) => typeof url === 'string' && url.endsWith('/api/notify'),
     );
-    expect(notifyCall).toBeDefined();
+    expect(notifyCall).toBeUndefined();
   });
 
   it('잘못된 코드 입력 → 404 → invalid_code 반환 + 페어링 저장 안 됨', async () => {
@@ -241,28 +238,23 @@ describe('[여정 4] 케어 대상 → 케어러 페어링 → notifyCaregivers 
     expect(raw).not.toContain('records');
   });
 
-  it('notifyCaregivers 서버 실패 → pendingNotify 큐 적재 → 로컬 체크 영향 없음', async () => {
+  it('v1: notifyCaregivers 호출돼도 fetch·큐 적재 안 함 (NOTIFY_ENABLED=false)', async () => {
     storageStore[SCHEDULE_STORAGE_KEYS.USER_KEY] = CARE_RECIPIENT_KEY;
 
-    // /api/notify 실패
-    mockFetch.mockResolvedValueOnce({
-      ok: false,
-      status: 503,
-      json: () => Promise.resolve({ error: 'service_unavailable' }),
-    });
-
-    // 예외 던지지 않음
+    // 예외 던지지 않음 — fire-and-forget 시그니처 그대로 유지
     await expect(
       notifyCaregivers('아침약', new Date().toISOString(), 'checked'),
     ).resolves.not.toThrow();
 
-    // pendingNotify 큐 적재 검증
+    // /api/notify 호출 안 됨
+    const notifyCall = mockFetch.mock.calls.find(
+      ([url]) => typeof url === 'string' && url.endsWith('/api/notify'),
+    );
+    expect(notifyCall).toBeUndefined();
+
+    // pendingNotify 큐 적재 안 됨 (재시도 의미 없음)
     const pendingRaw = storageStore[PAIR_STORAGE_KEYS.PENDING_NOTIFY];
-    expect(pendingRaw).toBeDefined();
-    const pending = JSON.parse(pendingRaw!) as Array<{ kind: string; routineLabel: string }>;
-    expect(pending).toHaveLength(1);
-    expect(pending[0]?.routineLabel).toBe('아침약');
-    expect(pending[0]?.kind).toBe('checked');
+    expect(pendingRaw).toBeUndefined();
   });
 });
 

@@ -64,6 +64,7 @@ import { getNickname, getRoutines } from '../services/storageService';
 import { getSavedUserKey } from '../services/authService';
 import { deleteSchedule, flushPendingQueue } from '../services/scheduleService';
 import { notifyCaregivers, flushPendingNotifyQueue } from '../services/pairService';
+import { syncMyTodayStatus } from '../services/careStatusService';
 import {
   grantDailyReward,
   getMonthlyGrantedPoints,
@@ -439,6 +440,28 @@ function HomePage() {
     setMonthlyPoints(points);
     setIsBudgetExhausted(budgetExhausted);
   }
+
+  // ─── Pull 방식 가족 현황: items/nickname 변경 시 Vercel KV에 sync ─────
+  // Ref: PRD step-08-family.md §처리 4 "Pull 방식 — 케어 대상이 체크 시 KV 갱신"
+  // 알림(notify) 비활성 대안. 가족 폰이 미니앱 진입 시 fetch해서 표시.
+  // 비즈월렛 비용 0 (스마트 발송 안 씀). fire-and-forget.
+  useEffect(() => {
+    if (!nickname || items.length === 0) return;
+    const todayDate = getKSTDateString();
+    void syncMyTodayStatus({
+      nickname,
+      date: todayDate,
+      items: items.map((it) => ({
+        routineId: it.routine.id,
+        routineLabel: it.routine.label,
+        scheduledTime: it.routine.time,
+        status: it.record.status as 'PENDING' | 'CHECKED' | 'MISSED',
+        ...(it.record.checkedAt ? { takenAt: it.record.checkedAt } : {}),
+      })),
+    }).catch(() => {
+      // 네트워크 실패 silent — 로컬 체크는 별개
+    });
+  }, [items, nickname]);
 
   // ─── 토스트 ──────────────────────────────────────────────────────────────
 
