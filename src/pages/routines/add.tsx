@@ -19,7 +19,6 @@
 import { createRoute, useNavigation, useBackEvent } from '@granite-js/react-native';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  Alert,
   Modal,
   ScrollView,
   StyleSheet,
@@ -48,6 +47,7 @@ import {
   REWARDED_AD_GROUP_ID,
 } from '../../services/fullScreenAdService';
 import { isAdRemovedActive } from '../../services/iapService';
+import { AlertModal, type AlertButton } from '../../components/AlertModal';
 import { isCameraSupported, takePhoto, pickFromAlbum } from '../../services/cameraService';
 import { ensureUserKey } from '../../services/authService';
 import { upsertSchedule } from '../../services/scheduleService';
@@ -115,6 +115,14 @@ function RoutineAddPage() {
   const [isRewardAdLoaded, setIsRewardAdLoaded] = useState(false);
   const [isAdRemoved, setIsAdRemovedState] = useState(false);
   const [isWatchingAd, setIsWatchingAd] = useState(false);
+
+  // AlertModal 상태 — Alert.alert 대체 (검수 가이드 §서비스 이용 동작 'TDS 모달 사용')
+  const [alertState, setAlertState] = useState<null | {
+    title: string;
+    message?: string;
+    buttons: AlertButton[];
+  }>(null);
+  const closeAlert = () => setAlertState(null);
 
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -260,20 +268,36 @@ function RoutineAddPage() {
   // Ref: references/sdk/framework/사진/fetchAlbumPhotos.md
   function handlePhotoAreaPress() {
     if (!isCameraSupported()) {
-      // isMinVersionSupported false → 대체 UI 안내
-      Alert.alert(
-        '카메라를 사용할 수 없어요',
-        '토스 앱을 최신 버전으로 업데이트하면 사진을 추가할 수 있어요.',
-        [{ text: '닫기' }],
-      );
+      setAlertState({
+        title: '카메라를 사용할 수 없어요',
+        message: '토스 앱을 최신 버전으로 업데이트하면 사진을 추가할 수 있어요.',
+        buttons: [{ label: '닫기', style: 'cancel', onPress: closeAlert }],
+      });
       return;
     }
+    // Ref: 비게임 출시 가이드 §서비스 이용 동작 — 권한 요청 전 사용자 동의 먼저 받기
     // Ref: references/dev-guide/design/ux-writing.md §다이얼로그 왼쪽 "닫기"
-    Alert.alert('사진 추가', '사진을 어떻게 추가할까요?', [
-      { text: '닫기', style: 'cancel' },
-      { text: '카메라로 촬영해요', onPress: handleTakePhoto },
-      { text: '갤러리에서 선택해요', onPress: handlePickAlbum },
-    ]);
+    setAlertState({
+      title: '사진 추가',
+      message: '사진을 어떻게 추가할까요?\n(카메라·사진첩 권한이 필요할 수 있어요)',
+      buttons: [
+        { label: '닫기', style: 'cancel', onPress: closeAlert },
+        {
+          label: '카메라로 촬영해요',
+          onPress: () => {
+            closeAlert();
+            void handleTakePhoto();
+          },
+        },
+        {
+          label: '갤러리에서 선택해요',
+          onPress: () => {
+            closeAlert();
+            void handlePickAlbum();
+          },
+        },
+      ],
+    });
   }
 
   async function handleTakePhoto() {
@@ -852,6 +876,16 @@ function RoutineAddPage() {
           </View>
         </View>
       </Modal>
+
+      {/* 공용 AlertModal — Alert.alert 대체 (TDS 가이드 부합) */}
+      <AlertModal
+        visible={alertState !== null}
+        title={alertState?.title ?? ''}
+        message={alertState?.message}
+        buttons={alertState?.buttons ?? []}
+        onRequestClose={closeAlert}
+        testID="add-alert-modal"
+      />
     </KeyboardAvoidingView>
   );
 }

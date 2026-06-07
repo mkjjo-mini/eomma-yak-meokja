@@ -50,7 +50,6 @@ import {
   purchaseRemoveAdsSubscription,
 } from '../services/iapService';
 import {
-  Alert,
   Image,
   Modal,
   Platform,
@@ -60,6 +59,7 @@ import {
   TouchableWithoutFeedback,
   View,
 } from 'react-native';
+import { AlertModal } from '../components/AlertModal';
 import { getNickname, getRoutines } from '../services/storageService';
 import { getSavedUserKey, detectLogoutAndClear } from '../services/authService';
 import { deleteSchedule, flushPendingQueue } from '../services/scheduleService';
@@ -249,6 +249,13 @@ function HomePage() {
   const [dropdownVisible, setDropdownVisible] = useState(false);
   // 페어링 허브 모달 (헤더 가족 아이콘 탭 시 분기 — 역할 미리 고정 X)
   const [familyHubVisible, setFamilyHubVisible] = useState(false);
+
+  // 조기 체크 확인 다이얼로그 — Alert.alert 대체 (검수 가이드 'TDS 모달 사용')
+  const [earlyCheckConfirm, setEarlyCheckConfirm] = useState<null | {
+    title: string;
+    message: string;
+    resolve: (v: boolean) => void;
+  }>(null);
 
   const isFamilyMode = viewerMode.kind === 'family';
 
@@ -563,15 +570,11 @@ function HomePage() {
       // CHECKED → 체크 해제는 시간 무관 즉시 허용.
       if (currentRecord.status !== 'CHECKED' && getKSTTimeHHMM() < routine.time) {
         const confirmed = await new Promise<boolean>((resolve) => {
-          Alert.alert(
-            '아직 복용 시간 전이에요',
-            `${routine.label} 예정 시각은 ${routine.time}이에요.\n지금 체크할까요?`,
-            [
-              { text: '취소', style: 'cancel', onPress: () => resolve(false) },
-              { text: '체크할게요', onPress: () => resolve(true) },
-            ],
-            { cancelable: true, onDismiss: () => resolve(false) },
-          );
+          setEarlyCheckConfirm({
+            title: '아직 복용 시간 전이에요',
+            message: `${routine.label} 예정 시각은 ${routine.time}이에요.\n지금 체크할까요?`,
+            resolve,
+          });
         });
         if (!confirmed) return;
       }
@@ -1468,6 +1471,35 @@ function HomePage() {
           </View>
         </View>
       </Modal>
+
+      {/* 조기 체크 확인 다이얼로그 (Alert.alert 대체 — TDS 가이드 부합) */}
+      <AlertModal
+        visible={earlyCheckConfirm !== null}
+        title={earlyCheckConfirm?.title ?? ''}
+        message={earlyCheckConfirm?.message}
+        buttons={[
+          {
+            label: '취소',
+            style: 'cancel',
+            onPress: () => {
+              earlyCheckConfirm?.resolve(false);
+              setEarlyCheckConfirm(null);
+            },
+          },
+          {
+            label: '체크할게요',
+            onPress: () => {
+              earlyCheckConfirm?.resolve(true);
+              setEarlyCheckConfirm(null);
+            },
+          },
+        ]}
+        onRequestClose={() => {
+          earlyCheckConfirm?.resolve(false);
+          setEarlyCheckConfirm(null);
+        }}
+        testID="early-check-confirm-modal"
+      />
     </View>
   );
 }

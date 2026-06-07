@@ -407,10 +407,9 @@ describe('카메라 버전 미지원 대체 UI', () => {
     await waitFor(() => expect(screen.getByRole('button', { name: '사진 추가하기' })).toBeTruthy());
     fireEvent.press(screen.getByRole('button', { name: '사진 추가하기' }));
 
-    expect(alertSpy).toHaveBeenCalledWith(
-      '카메라를 사용할 수 없어요',
-      expect.any(String),
-      expect.any(Array),
+    // AlertModal로 교체됨 (TDS 가이드) — 다이얼로그 텍스트로 검증
+    await waitFor(() =>
+      expect(screen.getByText('카메라를 사용할 수 없어요')).toBeTruthy(),
     );
   });
 });
