@@ -899,8 +899,10 @@ function HomePage() {
         >
           <View style={styles.adBannerWrapper} testID="inline-ad-wrapper">
             <AdErrorBoundary>
+              {/* 광고 그룹 ID — Apps-in-Toss 콘솔에서 발급 (배너·문구 강조) */}
+              {/* Ref: 콘솔 → 배너광고 정보 → 광고 그룹 ID */}
               <InlineAd
-                adGroupId="ait-ad-test-banner-id"
+                adGroupId="ait.v2.live.3014777cf0214ff6"
                 theme="auto"
                 tone="blackAndWhite"
                 variant="expanded"
