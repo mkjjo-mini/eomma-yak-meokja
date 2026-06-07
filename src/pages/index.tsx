@@ -332,12 +332,9 @@ function HomePage() {
 
   async function loadAll() {
     try {
-      console.log('[DIAG] loadAll 진입');
       // 별명 조회 — 온보딩 게이트
       const saved = await getNickname();
-      console.log('[DIAG] nickname:', saved);
       if (!saved) {
-        console.log('[DIAG] nickname 없음 → 온보딩 이동');
         navigation.navigate('/onboarding/name');
         return;
       }
@@ -348,7 +345,6 @@ function HomePage() {
       // Ref: references/sdk/framework/인앱결제/subscription.md §getSubscriptionInfo
       // 네트워크/구버전 환경: 24h 캐시 fallback, 실패 시 false
       const adRemoved = await isAdRemovedActive();
-      console.log('[DIAG] isAdRemovedActive:', adRemoved, '→ showRemoveAds:', !adRemoved);
       setShowRemoveAds(!adRemoved);
 
       // Step 4: 앱 포그라운드 복귀 시 pendingSchedule 큐 재시도
@@ -705,28 +701,14 @@ function HomePage() {
 
   // ─── 광고 콜백 ───────────────────────────────────────────────────────────
 
-  function handleAdRendered(payload?: unknown) {
-    console.log('[DIAG] onAdRendered', payload);
+  function handleAdRendered() {
     setAdFailed(false);
   }
 
-  function handleAdNoFill(payload?: unknown) {
-    const err = (payload as { error?: { code?: number; message?: string; domain?: string } })?.error;
-    console.warn('[DIAG] onNoFill — 광고 재고 없음', {
-      code: err?.code,
-      message: err?.message,
-      domain: err?.domain,
-    });
-    setAdFailed(true);
-  }
-
-  function handleAdFailedToRender(payload?: unknown) {
-    const err = (payload as { error?: { code?: number; message?: string; domain?: string } })?.error;
-    console.error('[DIAG] onAdFailedToRender — SDK 미지원/렌더 실패', {
-      code: err?.code,
-      message: err?.message,
-      domain: err?.domain,
-    });
+  function handleAdFailed() {
+    // 배너 로드 실패 시 빈 공간 없이 카드만 표시
+    // Ref: step-03 §검수 "배너 광고 로드 실패 시 빈 공간 없이 카드 리스트만 표시"
+    // onNoFill(재고 없음) / onAdFailedToRender(SDK 미지원·환경 미지원) 모두 동일 처리
     setAdFailed(true);
   }
 
@@ -923,8 +905,8 @@ function HomePage() {
                 tone="blackAndWhite"
                 variant="expanded"
                 onAdRendered={handleAdRendered}
-                onNoFill={handleAdNoFill}
-                onAdFailedToRender={handleAdFailedToRender}
+                onNoFill={handleAdFailed}
+                onAdFailedToRender={handleAdFailed}
               />
             </AdErrorBoundary>
           </View>

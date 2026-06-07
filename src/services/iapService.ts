@@ -149,7 +149,7 @@ export async function getFamilySlots(): Promise<number> {
       );
       if (!response) break;
       totalPaid += response.orders.filter(
-        (o) =>
+        (o: { sku: string; status: 'COMPLETED' | 'REFUNDED' }) =>
           o.sku === 'family_expansion_lifetime_v1' && o.status === 'COMPLETED',
       ).length;
       key = response.hasNext ? response.nextKey : null;
@@ -163,10 +163,6 @@ export async function getFamilySlots(): Promise<number> {
 }
 
 // ─── 결제 실행 공통부 ────────────────────────────────────────────────────────
-
-type PurchaseCreator =
-  | typeof IAP.createOneTimePurchaseOrder
-  | typeof IAP.createSubscriptionPurchaseOrder;
 
 function settleHelper(resolve: (r: IapResult) => void) {
   let settled = false;
