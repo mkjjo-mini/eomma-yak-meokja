@@ -261,11 +261,11 @@ function HomePage() {
   // Ref: references/dev-guide/design/consumer-ux-guide.md §3
   const [celebrateBadge, setCelebrateBadge] = useState<BadgeKind | null>(null);
 
-  // ─── Step 7: 이번 달 포인트 적립 현황 ────────────────────────────────────
-  // Ref: PRD step-07 §출력 "홈 하단 '이번 달 적립 {N}포인트' 표시"
-  // Ref: PRD step-07 §출력 "예산 소진 상태 → 카드 숨김"
-  const [monthlyPoints, setMonthlyPoints] = useState(0);
-  const [isBudgetExhausted, setIsBudgetExhausted] = useState(false);
+  // ─── Step 7: 포인트 적립 — v1 보류 (메모리 "엄마약먹자 보상 포인트 보류") ──
+  // RewardCard 미노출. 상태는 setter가 백그라운드에서 호출되긴 하나 UI 미반영.
+  // v2 활성 시 RewardCard 복원 + 이 변수들 다시 읽기.
+  const [, setMonthlyPoints] = useState(0);
+  const [, setIsBudgetExhausted] = useState(false);
 
   // ─── 초기 로드 ──────────────────────────────────────────────────────────
 
@@ -895,13 +895,8 @@ function HomePage() {
                 onPress={() => navigation.navigate('/calendar')}
               />
               {/* ── Step 7: 이번 달 적립 포인트 카드 ── */}
-              {/* Ref: PRD step-07 §출력 "이번 달 적립 {N}포인트" */}
-              {/* 예산 소진 / 적립 0 → 카드 숨김 (다크패턴 아님, 광고성 문구 없음) */}
-              {/* Ref: references/dev-guide/design/consumer-ux-guide.md §4 */}
-              <RewardCard
-                monthlyPoints={monthlyPoints}
-                isBudgetExhausted={isBudgetExhausted}
-              />
+              {/* v1: 포인트(보상) 기능 출시 범위 외 — RewardCard 미노출 (PRD step-07 v2 이관) */}
+              {/* 메모리 "엄마약먹자 보상 포인트 보류" 참조. v2에 RewardCard 복원 검토. */}
             </>
           }
           contentContainerStyle={[
@@ -913,16 +908,10 @@ function HomePage() {
         />
       )}
 
-      {/* 회차 없을 때도 복약률 카드 + 포인트 카드 표시 */}
+      {/* 회차 없을 때도 복약률 카드만 표시 (v1: 포인트 카드 미노출 — v2 이관) */}
       {items.length === 0 && (
         <View style={styles.adherenceCardWrapper}>
           <AdherenceCard adherence={adherence} hasData={hasAdherenceData} />
-          {/* Step 7: 회차 없을 때도 포인트 카드 표시 */}
-          {/* Ref: PRD step-07 §출력 */}
-          <RewardCard
-            monthlyPoints={monthlyPoints}
-            isBudgetExhausted={isBudgetExhausted}
-          />
         </View>
       )}
 
@@ -1233,44 +1222,8 @@ function AdherenceCard({ adherence, hasData, onPress }: AdherenceCardProps) {
  * Ref: PRD step-07 §출력 "예산 소진 → 카드 숨김"
  * Ref: references/dev-guide/design/consumer-ux-guide.md §4 (예상치 못한 광고 없음)
  */
-type RewardCardProps = {
-  monthlyPoints: number;
-  isBudgetExhausted: boolean;
-};
-
-function RewardCard({ monthlyPoints, isBudgetExhausted }: RewardCardProps) {
-  // 예산 소진 시 카드 전체 숨김
-  // Ref: PRD step-07 §출력 "예산 소진 상태 → 카드 자체 숨김"
-  if (isBudgetExhausted) return null;
-
-  return (
-    <View style={styles.rewardCard} testID="reward-card">
-      <View style={styles.rewardCardHeader}>
-        <Text style={styles.rewardCardTitle}>이번 달 적립 포인트</Text>
-      </View>
-
-      {monthlyPoints > 0 ? (
-        // 적립 금액 표시
-        // Ref: PRD step-07 §출력 "이번 달 적립 {N}포인트"
-        <View style={styles.rewardCardBody} testID="reward-card-amount">
-          <Text style={styles.rewardPointAmount} testID="reward-point-value">
-            {`+${monthlyPoints}`}
-          </Text>
-          <Text style={styles.rewardPointUnit}>포인트</Text>
-        </View>
-      ) : (
-        // 적립 0 빈 상태 — 광고성 아님, 동기 부여 문구만
-        // Ref: PRD step-07 §출력 "적립 0이면 '꾸준히 챙겨서 포인트도 받아요' 안내"
-        // Ref: references/dev-guide/design/consumer-ux-guide.md §4 (다크패턴 아님)
-        <View style={styles.rewardCardEmpty} testID="reward-card-empty">
-          <Text style={styles.rewardCardEmptyText}>
-            꾸준히 챙겨서 포인트도 받아요
-          </Text>
-        </View>
-      )}
-    </View>
-  );
-}
+// v1: RewardCard 컴포넌트 정의 제거 — 포인트 기능 v2 이관.
+// 메모리 "엄마약먹자 보상 포인트 보류" 참조. v2 복원 시 git 이력에서 가져옴.
 
 // ─── 회차 카드 컴포넌트 ───────────────────────────────────────────────────────
 
