@@ -351,33 +351,28 @@ function RoutineAddPage() {
 
   // ─── 저장 ────────────────────────────────────────────────────────────────
 
-  // 보상형 광고 → 등록 — 사용자 자발 시청
-  // userEarnedReward 받으면 등록 진행. dismissed(미완) 시 등록 안 함.
-  // 광고 시청 거부해도 일반 등록 버튼은 그대로 사용 가능 (B안: 선택형).
+  // 보상형 광고 → 등록 — 사용자 자발 시청 (B안: 선택형)
+  // 광고는 응원/노출 차원이며 등록의 게이트가 아님.
+  // 시청 결과(완주/중단/실패/미지원)와 무관하게 등록은 항상 진행 → 다크패턴 회피.
   async function handleSaveWithAd() {
     if (isSaving || isWatchingAd) return;
     if (!isRewardAdLoaded) {
-      // 아직 로드 안 됐으면 그냥 등록 fallback
+      // 아직 로드 안 됐으면 그냥 등록
       void handleSave();
       return;
     }
     setIsWatchingAd(true);
     try {
+      // 광고 결과는 로깅만 — 등록은 무조건 진행
       const result = await showAd(REWARDED_AD_GROUP_ID);
-      if (result.kind === 'rewarded') {
-        // 광고 끝까지 시청 — 등록 진행
-        await handleSave();
-      } else if (result.kind === 'dismissed') {
-        showToast('광고를 끝까지 시청해야 등록돼요. 그냥 등록도 가능해요');
-      } else if (result.kind === 'unsupported') {
-        // 구버전 등 미지원 — 그냥 등록 fallback
-        await handleSave();
-      } else {
-        showToast('광고 표시에 실패했어요. 그냥 등록을 이용해요');
+      if (result.kind === 'failed') {
+        console.warn('[add] 보상형 광고 표시 실패', result.reason);
       }
     } finally {
       setIsWatchingAd(false);
       setIsRewardAdLoaded(false);
+      // 광고 결과와 무관하게 등록 진행
+      await handleSave();
     }
   }
 
