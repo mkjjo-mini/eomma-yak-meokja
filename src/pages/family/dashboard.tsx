@@ -225,17 +225,7 @@ function FamilyDashboardPage() {
       {/* 내부 용어 "케어 대상" 노출 금지 — 사용자 입력 별명으로만 표시 */}
       {/* Ref: step-08-family.md §처리 3 */}
       <View style={styles.header}>
-        <TouchableOpacity
-          style={styles.backButton}
-          onPress={() => {
-            if (navigation.canGoBack()) navigation.goBack();
-          }}
-          accessibilityRole="button"
-          accessibilityLabel="뒤로 가기"
-          testID="back-button"
-        >
-          <Text style={styles.backButtonText}>←</Text>
-        </TouchableOpacity>
+        {/* 뒤로가기는 토스 nav 바가 제공 — 자체 ← 버튼 제거 (검수 가이드) */}
         <Text style={styles.headerTitle} accessibilityRole="header" testID="dashboard-title">
           {`${careRecipientNickname}의 오늘 복약`}
         </Text>

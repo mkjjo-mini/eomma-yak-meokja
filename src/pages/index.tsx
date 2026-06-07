@@ -61,7 +61,7 @@ import {
   View,
 } from 'react-native';
 import { getNickname, getRoutines } from '../services/storageService';
-import { getSavedUserKey } from '../services/authService';
+import { getSavedUserKey, detectLogoutAndClear } from '../services/authService';
 import { deleteSchedule, flushPendingQueue } from '../services/scheduleService';
 import { notifyCaregivers, flushPendingNotifyQueue } from '../services/pairService';
 import {
@@ -322,6 +322,10 @@ function HomePage() {
 
   async function loadAll() {
     try {
+      // 토스 로그인 해제 감지 + 데이터 클리어 (fire-and-forget)
+      // Ref: 비게임 출시 가이드 §토스 로그인 — "연결 끊으면 사용자 데이터 미니앱에 남아 있지 않아요"
+      void detectLogoutAndClear().catch(() => {});
+
       // 별명 조회 — 온보딩 게이트
       const saved = await getNickname();
       if (!saved) {

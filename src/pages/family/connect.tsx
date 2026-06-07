@@ -215,17 +215,7 @@ function FamilyConnectPage() {
       {/* ── 헤더 ── */}
       {/* Ref: step-08-family.md §처리 2 "헤더: '가족 연결하기'" */}
       <View style={styles.header}>
-        <TouchableOpacity
-          style={styles.backButton}
-          onPress={() => {
-            if (navigation.canGoBack()) navigation.goBack();
-          }}
-          accessibilityRole="button"
-          accessibilityLabel="뒤로 가기"
-          testID="back-button"
-        >
-          <Text style={styles.backButtonText}>←</Text>
-        </TouchableOpacity>
+        {/* 뒤로가기는 토스 nav 바가 제공 — 자체 ← 버튼 제거 (검수 가이드) */}
         <Text style={styles.headerTitle} accessibilityRole="header">
           가족 연결하기
         </Text>

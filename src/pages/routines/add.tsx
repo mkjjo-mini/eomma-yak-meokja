@@ -16,7 +16,7 @@
  *
  * 네트워크(Vercel 스케줄): 로컬 저장 후 백그라운드 동기화. 실패 시 재시도 큐.
  */
-import { createRoute, useNavigation } from '@granite-js/react-native';
+import { createRoute, useNavigation, useBackEvent } from '@granite-js/react-native';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Alert,
@@ -194,6 +194,9 @@ function RoutineAddPage() {
   // ─── 뒤로가기 (다크패턴 금지: 차단 아닌 확인만) ─────────────────────────
 
   // Ref: references/dev-guide/design/consumer-ux-guide.md §뒤로가기
+  // Ref: 비게임 출시 가이드 §내비게이션 바 — 토스 nav 바 뒤로가기 사용. 자체 ← 버튼 제거.
+  // 토스 nav 바 백 누를 때도 미저장 데이터 보호되도록 useBackEvent로 wire.
+  const backEvent = useBackEvent();
   function handleBackPress() {
     if (hasInput()) {
       setShowExitConfirm(true);
@@ -201,6 +204,11 @@ function RoutineAddPage() {
       doGoBack();
     }
   }
+  useEffect(() => {
+    backEvent.addEventListener(handleBackPress);
+    return () => backEvent.removeEventListener(handleBackPress);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hasInput, doGoBack]);
 
   function doGoBack() {
     if (navigation.canGoBack()) {
@@ -362,16 +370,27 @@ function RoutineAddPage() {
       return;
     }
     setIsWatchingAd(true);
+    let watchedToCompletion = false;
     try {
       // 광고 결과는 로깅만 — 등록은 무조건 진행
       const result = await showAd(REWARDED_AD_GROUP_ID);
       if (result.kind === 'failed') {
         console.warn('[add] 보상형 광고 표시 실패', result.reason);
       }
+      if (result.kind === 'rewarded') {
+        watchedToCompletion = true;
+      }
     } finally {
       setIsWatchingAd(false);
       setIsRewardAdLoaded(false);
-      // 광고 결과와 무관하게 등록 진행
+      // 광고 끝까지 시청 시 응원 메시지 — 명확한 보상으로 인지되게
+      // Ref: 비게임 출시 가이드 §인앱 광고 "리워드 광고를 끝까지 시청하면 보상이 정상 지급"
+      if (watchedToCompletion) {
+        showToast('응원해주셔서 고마워요 🙏');
+        // 응원 토스트가 등록 완료 토스트에 곧바로 덮이지 않게 잠시 대기
+        await new Promise((resolve) => setTimeout(resolve, 1200));
+      }
+      // 광고 결과와 무관하게 등록 진행 (B안: 선택형)
       await handleSave();
     }
   }
@@ -496,15 +515,7 @@ function RoutineAddPage() {
     >
       {/* 헤더 */}
       <View style={styles.header}>
-        <TouchableOpacity
-          style={styles.backButton}
-          onPress={handleBackPress}
-          accessibilityRole="button"
-          accessibilityLabel="뒤로 가요"
-          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-        >
-          <Text style={styles.backIcon}>←</Text>
-        </TouchableOpacity>
+        {/* 뒤로가기는 토스 nav 바가 제공 — 자체 ← 버튼 제거 (검수 가이드) */}
         <Text style={styles.headerTitle} numberOfLines={1}>
           {isEditMode
             ? '회차 수정'

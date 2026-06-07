@@ -19,7 +19,7 @@
  * 2명째 페어링 시도 시점은 8a에선 그냥 허용 — 가족 확장 IAP 게이팅은 8b에서 추가.
  * Ref: step-08-family.md §범위 밖 "8b로"
  */
-import { createRoute, useNavigation } from '@granite-js/react-native';
+import { createRoute } from '@granite-js/react-native';
 import { share } from '@apps-in-toss/framework';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
@@ -80,7 +80,7 @@ function useCountdown(expiresAt: string | null): string {
 // ─── 메인 화면 ────────────────────────────────────────────────────────────────
 
 function FamilySharePage() {
-  const navigation = useNavigation();
+  // 토스 nav 바 사용 — useNavigation 사용 X
 
   const [nickname, setNickname] = useState('');
   const [code, setCode] = useState<string | null>(null);
@@ -200,17 +200,7 @@ function FamilySharePage() {
       {/* ── 헤더 ── */}
       {/* Ref: step-08-family.md §처리 2 "헤더: {별명}의 가족에게 알리기" */}
       <View style={styles.header}>
-        <TouchableOpacity
-          style={styles.backButton}
-          onPress={() => {
-            if (navigation.canGoBack()) navigation.goBack();
-          }}
-          accessibilityRole="button"
-          accessibilityLabel="뒤로 가기"
-          testID="back-button"
-        >
-          <Text style={styles.backButtonText}>←</Text>
-        </TouchableOpacity>
+        {/* 뒤로가기는 토스 nav 바가 제공 — 자체 ← 버튼 제거 (검수 가이드) */}
         <Text style={styles.headerTitle} accessibilityRole="header">
           {nickname ? `${nickname}의 가족에게 알리기` : '가족에게 알리기'}
         </Text>

@@ -130,6 +130,10 @@ export function RefundNoticeBottomSheet({
                 <Text style={styles.noticeText} testID="refund-notice-main">
                   {noticeMainText}
                 </Text>
+                {/* 결제 내역·환불 확인 경로 안내 — 가이드 §인앱 결제 */}
+                <Text style={styles.noticeSubText} testID="refund-history-hint">
+                  {'결제 내역과 환불은 토스 앱의 [전체] → [결제·관리] → [인앱 결제 관리]에서 확인할 수 있어요.'}
+                </Text>
                 {/* 이용약관·환불 정책 링크 */}
                 {/* Ref: references/dev-guide/design/consumer-ux-guide.md §외부 링크 허용 예외 */}
                 <Text style={styles.noticeSubText}>
