@@ -48,6 +48,12 @@ export type CareStatusEntry = {
   monthlyAdherenceHasData?: boolean;
   /** 연속 복약 일수 (스트릭) */
   streak?: number;
+  /** 가족 모드 표시용: 추적 시작일 YYYY-MM-DD (이번 달 1일 또는 회차 등록일 중 늦은 것) */
+  monthlyStartDate?: string;
+  /** 가족 모드 표시용: 추적 종료일 YYYY-MM-DD (오늘) */
+  monthlyEndDate?: string;
+  /** 가족 모드 표시용: 시작~종료일 중 모든 회차 다 CHECKED인 일수 */
+  monthlyFullCheckedDays?: number;
   /** 서버에 데이터 없음 (케어 대상이 오늘 아직 안 열었음) */
   empty?: boolean;
 };
@@ -81,6 +87,9 @@ export async function syncMyTodayStatus(params: {
   monthlyAdherence?: number;
   monthlyAdherenceHasData?: boolean;
   streak?: number;
+  monthlyStartDate?: string;
+  monthlyEndDate?: string;
+  monthlyFullCheckedDays?: number;
 }): Promise<void> {
   const userKey = await Storage.getItem(SCHEDULE_STORAGE_KEYS.USER_KEY);
   if (!userKey) return;
@@ -117,6 +126,11 @@ export async function syncMyTodayStatus(params: {
           monthlyAdherenceHasData: params.monthlyAdherenceHasData,
         }),
         ...(params.streak !== undefined && { streak: params.streak }),
+        ...(params.monthlyStartDate && { monthlyStartDate: params.monthlyStartDate }),
+        ...(params.monthlyEndDate && { monthlyEndDate: params.monthlyEndDate }),
+        ...(params.monthlyFullCheckedDays !== undefined && {
+          monthlyFullCheckedDays: params.monthlyFullCheckedDays,
+        }),
       }),
     });
     // 실패해도 silent — 로컬 체크는 별개

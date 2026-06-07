@@ -84,6 +84,7 @@ import {
 import {
   calcMonthlyAdherenceWithSchedule,
   calcStreak,
+  calcThisMonthFullCheckedDays,
   filterTodayRoutines,
   flushMissedRecords,
   getKSTDateString,
@@ -494,24 +495,48 @@ function HomePage() {
   useEffect(() => {
     if (!nickname || items.length === 0) return;
     const todayDate = getKSTDateString();
-    void syncMyTodayStatus({
-      nickname,
-      date: todayDate,
-      items: items.map((it) => ({
-        routineId: it.routine.id,
-        routineLabel: it.routine.label,
-        scheduledTime: it.routine.time,
-        status: it.record.status as 'PENDING' | 'CHECKED' | 'MISSED',
-        ...(it.routine.mealTiming && { mealTiming: it.routine.mealTiming }),
-        ...(it.record.checkedAt ? { takenAt: it.record.checkedAt } : {}),
-        ...(it.routine.photoBase64 ? { photoBase64: it.routine.photoBase64 } : {}),
-      })),
-      monthlyAdherence: adherence,
-      monthlyAdherenceHasData: hasAdherenceData,
-      streak,
-    }).catch(() => {
-      // 네트워크 실패 silent — 로컬 체크는 별개
-    });
+
+    // 가족 모드 표시용 사이드 계산 — 본인 폰에서 미리 산출해서 sync 페이로드에 포함
+    void (async () => {
+      let monthlySummary: {
+        monthlyStartDate?: string;
+        monthlyEndDate?: string;
+        monthlyFullCheckedDays?: number;
+      } = {};
+      try {
+        // 전체 회차·기록 (이번 달 1일~오늘 전 기간) 기반 계산
+        const allRoutines = await getRoutines();
+        const allRecords = await getRecords();
+        const summary = calcThisMonthFullCheckedDays(allRoutines, allRecords);
+        monthlySummary = {
+          monthlyStartDate: summary.startDate,
+          monthlyEndDate: summary.endDate,
+          monthlyFullCheckedDays: summary.fullCheckedDays,
+        };
+      } catch {
+        // 계산 실패해도 sync는 진행 (필드만 누락)
+      }
+
+      void syncMyTodayStatus({
+        nickname,
+        date: todayDate,
+        items: items.map((it) => ({
+          routineId: it.routine.id,
+          routineLabel: it.routine.label,
+          scheduledTime: it.routine.time,
+          status: it.record.status as 'PENDING' | 'CHECKED' | 'MISSED',
+          ...(it.routine.mealTiming && { mealTiming: it.routine.mealTiming }),
+          ...(it.record.checkedAt ? { takenAt: it.record.checkedAt } : {}),
+          ...(it.routine.photoBase64 ? { photoBase64: it.routine.photoBase64 } : {}),
+        })),
+        monthlyAdherence: adherence,
+        monthlyAdherenceHasData: hasAdherenceData,
+        streak,
+        ...monthlySummary,
+      }).catch(() => {
+        // 네트워크 실패 silent — 로컬 체크는 별개
+      });
+    })();
   }, [items, nickname, adherence, hasAdherenceData, streak]);
 
   // ─── 토스트 ──────────────────────────────────────────────────────────────
@@ -997,10 +1022,15 @@ function HomePage() {
                   </TouchableOpacity>
                 )}
                 {/* 부모님 이번 달 복약률 (본인 폰이 계산해 보낸 값) */}
+                {/* 도넛 안 %와 중복 회피 — "M월 D일 ~ M월 D일 중 N일 챙기셨어요"로 대체 */}
                 <AdherenceCard
                   adherence={familyStatus.monthlyAdherence ?? 0}
                   hasData={familyStatus.monthlyAdherenceHasData ?? false}
-                  onPress={() => {}}
+                  customSubtitle={buildFamilyAdherenceSubtitle(
+                    familyStatus.monthlyStartDate,
+                    familyStatus.monthlyEndDate,
+                    familyStatus.monthlyFullCheckedDays,
+                  )}
                 />
               </>
             }
@@ -1376,13 +1406,36 @@ function adherenceLabelFor(adherence: number): string {
   return '아직 완료한 날이 없어요';
 }
 
+/**
+ * 가족 모드 도넛 옆 부가 문구 빌더.
+ * 입력 부족 시 빈 문자열 반환 (AdherenceCard가 falsy로 처리해 기본 % 표시로 fallback).
+ *
+ * 예: "6월 1일 ~ 6월 7일 중 5일 챙기셨어요"
+ */
+function buildFamilyAdherenceSubtitle(
+  startDate?: string,
+  endDate?: string,
+  fullCheckedDays?: number,
+): string | undefined {
+  if (!startDate || !endDate || fullCheckedDays === undefined) return undefined;
+  // YYYY-MM-DD → M월 D일
+  const fmt = (iso: string): string => {
+    const m = Number(iso.slice(5, 7));
+    const d = Number(iso.slice(8, 10));
+    return `${m}월 ${d}일`;
+  };
+  return `${fmt(startDate)} ~ ${fmt(endDate)} 중 ${fullCheckedDays}일 챙기셨어요`;
+}
+
 type AdherenceCardProps = {
   adherence: number;
   hasData: boolean;
   onPress?: () => void;
+  /** 가족 모드 등에서 % 대신 표시할 부가 문구 (도넛 옆 % 정보 중복 회피) */
+  customSubtitle?: string;
 };
 
-function AdherenceCard({ adherence, hasData, onPress }: AdherenceCardProps) {
+function AdherenceCard({ adherence, hasData, onPress, customSubtitle }: AdherenceCardProps) {
   const body = (
     <>
       <View style={styles.adherenceHeader}>
@@ -1397,12 +1450,21 @@ function AdherenceCard({ adherence, hasData, onPress }: AdherenceCardProps) {
             testID="adherence-progress"
           />
           <View style={styles.adherenceDesc}>
-            <Text style={styles.adherencePercent} testID="adherence-percent">
-              {`${Math.round(adherence * 100)}%`}
-            </Text>
-            <Text style={styles.adherenceLabel}>
-              {adherenceLabelFor(adherence)}
-            </Text>
+            {customSubtitle ? (
+              // 가족 모드: 도넛 안 %와 중복 회피. 기간·체크 일수로 대체
+              <Text style={styles.adherenceLabel} testID="adherence-custom-subtitle">
+                {customSubtitle}
+              </Text>
+            ) : (
+              <>
+                <Text style={styles.adherencePercent} testID="adherence-percent">
+                  {`${Math.round(adherence * 100)}%`}
+                </Text>
+                <Text style={styles.adherenceLabel}>
+                  {adherenceLabelFor(adherence)}
+                </Text>
+              </>
+            )}
           </View>
         </View>
       ) : (
