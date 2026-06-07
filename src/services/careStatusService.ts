@@ -23,11 +23,15 @@ import type { PairingRecord } from '../types/pair';
 export type CareStatusItem = {
   routineId: string;
   routineLabel: string;
+  /** 식전/식후 — 선택 */
+  mealTiming?: 'before' | 'after';
   /** "HH:MM" KST */
   scheduledTime: string;
   status: 'PENDING' | 'CHECKED' | 'MISSED';
   /** 체크 완료 시각 (CHECKED인 경우만) — ISO */
   takenAt?: string;
+  /** 회차 사진 base64 (선택). 500KB 초과 시 sync 단계에서 skip. */
+  photoBase64?: string;
 };
 
 export type CareStatusEntry = {
@@ -38,9 +42,18 @@ export type CareStatusEntry = {
   items: CareStatusItem[];
   /** 마지막 업데이트 시각 — ISO */
   updatedAt: string;
+  /** 이번 달 복약률 (0~1) — 본인 폰이 미리 계산 */
+  monthlyAdherence?: number;
+  /** 이번 달 데이터 존재 여부 (false면 도넛 0% 미표시) */
+  monthlyAdherenceHasData?: boolean;
+  /** 연속 복약 일수 (스트릭) */
+  streak?: number;
   /** 서버에 데이터 없음 (케어 대상이 오늘 아직 안 열었음) */
   empty?: boolean;
 };
+
+/** 사진 base64의 안전한 최대 사이즈 (전송·KV 보호). 초과 시 sync 단계에서 skip. */
+const MAX_PHOTO_BASE64_BYTES = 500 * 1024;
 
 /** 런타임 시점에 env 읽기 (pairService와 동일 패턴) */
 function getVercelApiUrl(): string {
@@ -65,12 +78,25 @@ export async function syncMyTodayStatus(params: {
   nickname: string;
   date: string;
   items: CareStatusItem[];
+  monthlyAdherence?: number;
+  monthlyAdherenceHasData?: boolean;
+  streak?: number;
 }): Promise<void> {
   const userKey = await Storage.getItem(SCHEDULE_STORAGE_KEYS.USER_KEY);
   if (!userKey) return;
 
   const vercelApiUrl = getVercelApiUrl();
   if (!vercelApiUrl) return;
+
+  // 사진 사이즈 안전망: 큰 사진은 사진 필드만 비우고 전송 (회차 자체는 sync)
+  // base64 길이 = byte 길이의 대략 4/3. 보수적으로 length로 직접 비교.
+  const sanitizedItems = params.items.map((it) => {
+    if (it.photoBase64 && it.photoBase64.length > MAX_PHOTO_BASE64_BYTES) {
+      const { photoBase64: _omitted, ...rest } = it;
+      return rest;
+    }
+    return it;
+  });
 
   try {
     await fetch(`${vercelApiUrl}/api/care-status`, {
@@ -83,7 +109,14 @@ export async function syncMyTodayStatus(params: {
         recipientUserKey: userKey,
         recipientNickname: params.nickname,
         date: params.date,
-        items: params.items,
+        items: sanitizedItems,
+        ...(params.monthlyAdherence !== undefined && {
+          monthlyAdherence: params.monthlyAdherence,
+        }),
+        ...(params.monthlyAdherenceHasData !== undefined && {
+          monthlyAdherenceHasData: params.monthlyAdherenceHasData,
+        }),
+        ...(params.streak !== undefined && { streak: params.streak }),
       }),
     });
     // 실패해도 silent — 로컬 체크는 별개

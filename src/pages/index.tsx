@@ -64,7 +64,13 @@ import { getNickname, getRoutines } from '../services/storageService';
 import { getSavedUserKey } from '../services/authService';
 import { deleteSchedule, flushPendingQueue } from '../services/scheduleService';
 import { notifyCaregivers, flushPendingNotifyQueue } from '../services/pairService';
-import { syncMyTodayStatus } from '../services/careStatusService';
+import {
+  syncMyTodayStatus,
+  fetchCareRecipientTodayStatus,
+  type CareStatusEntry,
+} from '../services/careStatusService';
+import { getPairings } from '../services/pairService';
+import type { PairingRecord } from '../types/pair';
 import {
   loadAd,
   showAd,
@@ -221,6 +227,27 @@ function HomePage() {
   // Ref: references/sdk/framework/광고/IntegratedAd.md
   const interstitialLoadedRef = useRef(false);
   const interstitialCleanupRef = useRef<(() => void) | null>(null);
+
+  // ─── 가족 모드 뷰어 (드롭다운으로 본인/가족 전환) ─────────────────────────
+  // self: 내 회차 (편집·체크 가능)
+  // family: 페어링된 부모 한 명 (읽기 전용 — 데이터 주인 원칙)
+  type ViewerSelf = { kind: 'self' };
+  type ViewerFamily = {
+    kind: 'family';
+    /** PairingRecord.caregiverUserKey — 자식 폰에 저장된 자기 userKey */
+    caregiverUserKey: string;
+    /** 부모 별명 */
+    recipientNickname: string;
+  };
+  type ViewerMode = ViewerSelf | ViewerFamily;
+
+  const [viewerMode, setViewerMode] = useState<ViewerMode>({ kind: 'self' });
+  const [familyOptions, setFamilyOptions] = useState<PairingRecord[]>([]);
+  const [familyStatus, setFamilyStatus] = useState<CareStatusEntry | null>(null);
+  const [isFamilyLoading, setIsFamilyLoading] = useState(false);
+  const [dropdownVisible, setDropdownVisible] = useState(false);
+
+  const isFamilyMode = viewerMode.kind === 'family';
 
   // ─── Step 8b: 광고 제거 IAP 바텀시트 ────────────────────────────────────
   // Ref: PRD step-08-family.md §처리 6 "링크 탭 → 결제 바텀시트"
@@ -424,6 +451,42 @@ function HomePage() {
     };
   }, [preloadInterstitial]);
 
+  // ─── 가족 옵션 (페어링된 부모 중 별명 보유분만) 진입 시 로드 ─────────────
+  // 자식 폰의 pairings 중 careRecipientNickname을 가진 항목 = 부모 페어링
+  // (엄마 폰의 pairings에는 careRecipientNickname 없음 — refreshRecipientPairings 참고)
+  useEffect(() => {
+    void (async () => {
+      try {
+        const all = await getPairings();
+        const withRecipientName = all.filter(
+          (p) => !!p.careRecipientNickname && p.careRecipientNickname.length > 0,
+        );
+        setFamilyOptions(withRecipientName);
+      } catch {
+        // ignore
+      }
+    })();
+  }, []);
+
+  // ─── 가족 모드일 때 케어 대상의 오늘 상태 fetch ────────────────────────────
+  // viewerMode 변경 시점 + 화면 진입 시 자동 호출
+  useEffect(() => {
+    if (viewerMode.kind !== 'family') {
+      setFamilyStatus(null);
+      return;
+    }
+    void (async () => {
+      setIsFamilyLoading(true);
+      try {
+        const todayStr = getKSTDateString();
+        const status = await fetchCareRecipientTodayStatus(todayStr);
+        setFamilyStatus(status);
+      } finally {
+        setIsFamilyLoading(false);
+      }
+    })();
+  }, [viewerMode]);
+
   // ─── Pull 방식 가족 현황: items/nickname 변경 시 Vercel KV에 sync ─────
   // Ref: PRD step-08-family.md §처리 4 "Pull 방식 — 케어 대상이 체크 시 KV 갱신"
   // 알림(notify) 비활성 대안. 가족 폰이 미니앱 진입 시 fetch해서 표시.
@@ -439,12 +502,17 @@ function HomePage() {
         routineLabel: it.routine.label,
         scheduledTime: it.routine.time,
         status: it.record.status as 'PENDING' | 'CHECKED' | 'MISSED',
+        ...(it.routine.mealTiming && { mealTiming: it.routine.mealTiming }),
         ...(it.record.checkedAt ? { takenAt: it.record.checkedAt } : {}),
+        ...(it.routine.photoBase64 ? { photoBase64: it.routine.photoBase64 } : {}),
       })),
+      monthlyAdherence: adherence,
+      monthlyAdherenceHasData: hasAdherenceData,
+      streak,
     }).catch(() => {
       // 네트워크 실패 silent — 로컬 체크는 별개
     });
-  }, [items, nickname]);
+  }, [items, nickname, adherence, hasAdherenceData, streak]);
 
   // ─── 토스트 ──────────────────────────────────────────────────────────────
 
@@ -767,16 +835,50 @@ function HomePage() {
       {/* Ref: step-06 §출력 "헤더 영역에 스트릭 카운터 추가" */}
       <View style={styles.header} testID="home-header">
         <View style={styles.headerRow}>
-          <View style={styles.headerTextArea}>
-            <Text style={styles.headerTitle} accessibilityRole="header">
-              {nickname ? `${nickname}의 오늘 복약` : '오늘 복약'}
-            </Text>
-            {totalCount > 0 && (
-              <Text style={styles.headerSubtitle}>
-                {`${totalCount}개 중 ${checkedCount}개 체크`}
+          <TouchableOpacity
+            style={styles.headerTextArea}
+            onPress={() => {
+              if (familyOptions.length > 0) setDropdownVisible(true);
+            }}
+            disabled={familyOptions.length === 0}
+            accessibilityRole={familyOptions.length > 0 ? 'button' : 'header'}
+            accessibilityLabel={
+              familyOptions.length > 0
+                ? `${
+                    viewerMode.kind === 'family' ? viewerMode.recipientNickname : nickname
+                  }의 오늘 복약, 탭해서 다른 가족 선택`
+                : `${nickname ?? ''}의 오늘 복약`
+            }
+            testID="home-viewer-dropdown"
+          >
+            <View style={styles.headerTitleRow}>
+              <Text style={styles.headerTitle}>
+                {viewerMode.kind === 'family'
+                  ? `${viewerMode.recipientNickname}의 오늘 복약`
+                  : nickname
+                    ? `${nickname}의 오늘 복약`
+                    : '오늘 복약'}
               </Text>
+              {familyOptions.length > 0 && (
+                <Text style={styles.headerDropdownArrow}>▾</Text>
+              )}
+            </View>
+            {viewerMode.kind === 'family' ? (
+              familyStatus &&
+              !familyStatus.empty &&
+              familyStatus.items.length > 0 && (
+                <Text style={styles.headerSubtitle}>
+                  {`${familyStatus.items.length}개 중 ${familyStatus.items.filter((i) => i.status === 'CHECKED').length}개 체크`}
+                </Text>
+              )
+            ) : (
+              totalCount > 0 && (
+                <Text style={styles.headerSubtitle}>
+                  {`${totalCount}개 중 ${checkedCount}개 체크`}
+                </Text>
+              )
             )}
-          </View>
+          </TouchableOpacity>
 
           {/* 가족 아이콘 버튼 → /family/share */}
           {/* Ref: PRD step-08-family.md §처리 2 "헤더 우측 또는 적절한 위치에 '가족' 아이콘/링크" */}
@@ -826,7 +928,8 @@ function HomePage() {
       {/* Ref: PRD step-05 §출력 "홈 상단 '어제 N개 놓쳤어요' 배너 조건부 표시 (닫기 포함)" */}
       {/* 다크패턴 방지: 강제 팝업 아님, 닫기 버튼 있음 */}
       {/* Ref: references/dev-guide/design/consumer-ux-guide.md §1,3 */}
-      {missedBannerCount > 0 && !missedBannerDismissed && (
+      {/* MISSED 배너는 본인 모드에서만 (가족 모드에선 자녀가 조치할 수 없으니 미노출) */}
+      {!isFamilyMode && missedBannerCount > 0 && !missedBannerDismissed && (
         <View style={styles.missedBanner} testID="missed-banner">
           <Text style={styles.missedBannerText} testID="missed-banner-text">
             {`어제 ${missedBannerCount}개 회차를 놓쳤어요`}
@@ -844,9 +947,72 @@ function HomePage() {
         </View>
       )}
 
-      {/* ── 카드 리스트 ── */}
+      {/* ── 카드 리스트 ── (모드별 분기) */}
       {/* Ref: references/sdk/framework/화면제어/IOFlatList.md */}
-      {items.length === 0 ? (
+      {isFamilyMode ? (
+        isFamilyLoading ? (
+          <View style={styles.emptyContainer} testID="family-loading">
+            <Text style={styles.emptyText}>불러오는 중이에요…</Text>
+          </View>
+        ) : !familyStatus || familyStatus.empty || familyStatus.items.length === 0 ? (
+          <View style={styles.emptyContainer} testID="family-empty">
+            <Text style={styles.emptyIcon}>💊</Text>
+            <Text style={styles.emptyText}>아직 정보가 없어요</Text>
+            <Text style={styles.emptySubtext}>
+              {viewerMode.kind === 'family'
+                ? `${viewerMode.recipientNickname}이/가 오늘 앱을 여시면 자동으로 받아와요`
+                : ''}
+            </Text>
+          </View>
+        ) : (
+          <IOFlatList
+            data={familyStatus.items}
+            keyExtractor={(item) => item.routineId}
+            renderItem={({ item }) => (
+              <FamilyStatusCard
+                item={item}
+                colorTag={DEFAULT_COLOR}
+              />
+            )}
+            ListFooterComponent={
+              <>
+                {/* 광고 제거 promo 카드 (구독자 아닐 때) — 가족 모드에서도 동일 노출 */}
+                {showRemoveAds && (
+                  <TouchableOpacity
+                    style={styles.promoCard}
+                    onPress={() => setRemoveAdsSheetVisible(true)}
+                    accessibilityRole="button"
+                    accessibilityLabel="광고 없이 쓰기 구독 안내 열기"
+                    testID="promo-card-remove-ads-family"
+                  >
+                    <View style={styles.promoColorStripe} />
+                    <View style={styles.promoThumbnail}>
+                      <Text style={styles.promoThumbnailEmoji}>✨</Text>
+                    </View>
+                    <View style={styles.promoBody}>
+                      <Text style={styles.promoLabel}>광고 없이 쓰기</Text>
+                      <Text style={styles.promoSubtext}>월 1,900원으로 광고 제거</Text>
+                    </View>
+                    <Text style={styles.promoArrow}>›</Text>
+                  </TouchableOpacity>
+                )}
+                {/* 부모님 이번 달 복약률 (본인 폰이 계산해 보낸 값) */}
+                <AdherenceCard
+                  adherence={familyStatus.monthlyAdherence ?? 0}
+                  hasData={familyStatus.monthlyAdherenceHasData ?? false}
+                  onPress={() => {}}
+                />
+              </>
+            }
+            contentContainerStyle={[
+              styles.listContent,
+              { paddingBottom: adAreaHeight + 24 },
+            ]}
+            showsVerticalScrollIndicator={false}
+            testID="family-status-list"
+          />
+        )
+      ) : items.length === 0 ? (
         <View style={styles.emptyContainer} testID="empty-state">
           <Text style={styles.emptyIcon}>💊</Text>
           <Text style={styles.emptyText}>오늘 복용할 회차가 없어요</Text>
@@ -915,17 +1081,19 @@ function HomePage() {
         </View>
       )}
 
-      {/* ── 하단 플로팅 "+" 버튼 ── */}
+      {/* ── 하단 플로팅 "+" 버튼 ── (가족 모드에선 미표시: 회차 등록 권한 X) */}
       {/* Ref: step-03 §출력 "하단 '+' 버튼 → 회차 등록 화면" */}
-      <TouchableOpacity
-        style={styles.fab}
-        onPress={() => navigation.navigate('/routines/add')}
-        accessibilityRole="button"
-        accessibilityLabel="복용 회차 등록해요"
-        testID="fab-add"
-      >
-        <Text style={styles.fabText}>+</Text>
-      </TouchableOpacity>
+      {!isFamilyMode && (
+        <TouchableOpacity
+          style={styles.fab}
+          onPress={() => navigation.navigate('/routines/add')}
+          accessibilityRole="button"
+          accessibilityLabel="복용 회차 등록해요"
+          testID="fab-add"
+        >
+          <Text style={styles.fabText}>+</Text>
+        </TouchableOpacity>
+      )}
 
       {/* ── 하단 고정 광고 배너 (IAP 미결제 시만) ── */}
       {/* Ref: references/sdk/framework/광고/RN-BannerAd.md §레이아웃 가이드 */}
@@ -1025,6 +1193,70 @@ function HomePage() {
                 >
                   <Text style={styles.menuItemClose}>닫기</Text>
                 </TouchableOpacity>
+              </View>
+            </TouchableWithoutFeedback>
+          </View>
+        </TouchableWithoutFeedback>
+      </Modal>
+
+      {/* ── 뷰어 모드 드롭다운 (본인 / 페어링된 가족 선택) ── */}
+      <Modal
+        visible={dropdownVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setDropdownVisible(false)}
+        testID="viewer-dropdown-modal"
+      >
+        <TouchableWithoutFeedback onPress={() => setDropdownVisible(false)}>
+          <View style={styles.dropdownOverlay}>
+            <TouchableWithoutFeedback>
+              <View style={styles.dropdownContent} testID="viewer-dropdown">
+                <TouchableOpacity
+                  style={styles.dropdownItem}
+                  onPress={() => {
+                    setViewerMode({ kind: 'self' });
+                    setDropdownVisible(false);
+                  }}
+                  accessibilityRole="button"
+                  testID="dropdown-self"
+                >
+                  <Text style={styles.dropdownItemMarker}>
+                    {viewerMode.kind === 'self' ? '✓' : ' '}
+                  </Text>
+                  <Text style={styles.dropdownItemText}>
+                    {nickname ? `${nickname} (나)` : '나'}
+                  </Text>
+                </TouchableOpacity>
+                {familyOptions.map((opt) => {
+                  const isActive =
+                    viewerMode.kind === 'family' &&
+                    viewerMode.caregiverUserKey === opt.caregiverUserKey;
+                  return (
+                    <View key={opt.caregiverUserKey}>
+                      <View style={styles.dropdownDivider} />
+                      <TouchableOpacity
+                        style={styles.dropdownItem}
+                        onPress={() => {
+                          setViewerMode({
+                            kind: 'family',
+                            caregiverUserKey: opt.caregiverUserKey,
+                            recipientNickname: opt.careRecipientNickname ?? '가족',
+                          });
+                          setDropdownVisible(false);
+                        }}
+                        accessibilityRole="button"
+                        testID={`dropdown-family-${opt.caregiverUserKey}`}
+                      >
+                        <Text style={styles.dropdownItemMarker}>
+                          {isActive ? '✓' : ' '}
+                        </Text>
+                        <Text style={styles.dropdownItemText}>
+                          {opt.careRecipientNickname ?? '가족'}
+                        </Text>
+                      </TouchableOpacity>
+                    </View>
+                  );
+                })}
               </View>
             </TouchableWithoutFeedback>
           </View>
@@ -1224,6 +1456,67 @@ function AdherenceCard({ adherence, hasData, onPress }: AdherenceCardProps) {
  */
 // v1: RewardCard 컴포넌트 정의 제거 — 포인트 기능 v2 이관.
 // 메모리 "엄마약먹자 보상 포인트 보류" 참조. v2 복원 시 git 이력에서 가져옴.
+
+// ─── 가족 모드 회차 카드 (읽기 전용) ─────────────────────────────────────────
+// 본인 RoutineCard와 같은 형태지만 체크 토글·길게누르기·케밥 등 편집 UI 없음.
+// 사진은 KV에서 받은 base64 사용. 데이터 주인 원칙: 부모 회차 수정 불가.
+
+type FamilyStatusCardProps = {
+  item: {
+    routineId: string;
+    routineLabel: string;
+    scheduledTime: string;
+    mealTiming?: 'before' | 'after';
+    status: 'PENDING' | 'CHECKED' | 'MISSED';
+    photoBase64?: string;
+  };
+  colorTag: string;
+};
+
+function FamilyStatusCard({ item, colorTag }: FamilyStatusCardProps) {
+  const statusText =
+    item.status === 'CHECKED'
+      ? '드셨어요'
+      : item.status === 'MISSED'
+        ? '놓치셨어요'
+        : '대기 중';
+  const timeLabel = item.mealTiming
+    ? `${item.scheduledTime} (${item.mealTiming === 'before' ? '식전' : '식후'})`
+    : item.scheduledTime;
+
+  return (
+    <View
+      style={[styles.card, item.status === 'CHECKED' && styles.cardChecked]}
+      testID={`family-status-card-${item.routineId}`}
+    >
+      <View style={[styles.colorStripe, { backgroundColor: colorTag }]} />
+      <View style={styles.cardThumbnail}>
+        {item.photoBase64 ? (
+          <Image source={{ uri: item.photoBase64 }} style={styles.thumbnailImage} />
+        ) : (
+          <View style={[styles.thumbnailIcon, { backgroundColor: colorTag + '22' }]}>
+            <Text style={styles.thumbnailEmoji}>{DEFAULT_ICON_EMOJI}</Text>
+          </View>
+        )}
+      </View>
+      <View style={styles.cardBody}>
+        <Text style={styles.cardLabel} numberOfLines={1}>
+          {item.routineLabel}
+        </Text>
+        <Text style={styles.cardTime}>{timeLabel}</Text>
+        <Text
+          style={[
+            styles.familyStatusBadge,
+            item.status === 'CHECKED' && styles.familyStatusBadgeChecked,
+            item.status === 'MISSED' && styles.familyStatusBadgeMissed,
+          ]}
+        >
+          {statusText}
+        </Text>
+      </View>
+    </View>
+  );
+}
 
 // ─── 회차 카드 컴포넌트 ───────────────────────────────────────────────────────
 
@@ -2015,5 +2308,78 @@ const styles = StyleSheet.create({
     color: '#FF6B6B',
     marginRight: 16,
     fontWeight: '300',
+  },
+  // ─── 헤더 드롭다운 ──────────────────────────────────────────────
+  headerTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  headerDropdownArrow: {
+    fontSize: 16,
+    color: '#191F28',
+    fontWeight: '600',
+  },
+  // ─── 드롭다운 모달 ──────────────────────────────────────────────
+  dropdownOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.35)',
+    paddingTop: Platform.OS === 'ios' ? 90 : 60,
+    alignItems: 'center',
+  },
+  dropdownContent: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 14,
+    minWidth: 240,
+    paddingVertical: 8,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.12,
+    shadowRadius: 12,
+    elevation: 6,
+  },
+  dropdownItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    gap: 8,
+  },
+  dropdownItemMarker: {
+    fontSize: 15,
+    width: 18,
+    color: '#FF6B6B',
+    fontWeight: '700',
+  },
+  dropdownItemText: {
+    fontSize: 16,
+    color: '#191F28',
+    fontWeight: '500',
+  },
+  dropdownDivider: {
+    height: 1,
+    backgroundColor: '#F2F4F6',
+    marginHorizontal: 12,
+  },
+  // ─── 가족 모드 상태 뱃지 (FamilyStatusCard 안) ────────────────
+  familyStatusBadge: {
+    alignSelf: 'flex-start',
+    fontSize: 12,
+    fontWeight: '600',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 8,
+    overflow: 'hidden',
+    backgroundColor: '#F2F4F6',
+    color: '#8B95A1',
+    marginTop: 4,
+  },
+  familyStatusBadgeChecked: {
+    backgroundColor: '#E8F5E9',
+    color: '#1ED760',
+  },
+  familyStatusBadgeMissed: {
+    backgroundColor: '#FFF3E0',
+    color: '#FF9F40',
   },
 });
