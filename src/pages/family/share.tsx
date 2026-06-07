@@ -34,17 +34,12 @@ import {
 } from 'react-native';
 import {
   generatePairingCode,
-  getPairings,
+  refreshRecipientPairings,
   unpair,
 } from '../../services/pairService';
 import type { PairingRecord } from '../../types/pair';
 import { getNickname } from '../../services/storageService';
 import { ensureUserKey } from '../../services/authService';
-import {
-  getFamilySlots,
-  purchaseFamilyExpansion,
-} from '../../services/iapService';
-import { RefundNoticeBottomSheet } from '../../components/RefundNoticeBottomSheet';
 
 export const Route = createRoute('/family/share', {
   validateParams: (params) => params,
@@ -98,12 +93,8 @@ function FamilySharePage() {
   const [unpairTarget, setUnpairTarget] = useState<PairingRecord | null>(null);
   const [unpairConfirmVisible, setUnpairConfirmVisible] = useState(false);
 
-  // ─── Step 8b: 가족 슬롯 IAP (누적 per-slot 모델) ───────────────────────────
-  // Ref: PRD step-08-family.md §처리 7 — "결제마다 영구 슬롯 +1, 슬롯 내 무료 재연결"
-  // 슬롯 수 = 1(무료) + getCompletedOrRefundedOrders로 카운트한 COMPLETED 결제 수.
-  // 환불 시 REFUNDED 상태 자동 제외 → 슬롯 자동 차감.
-  const [familySlots, setFamilySlots] = useState(1);
-  const [familyExpansionSheetVisible, setFamilyExpansionSheetVisible] = useState(false);
+  // v1 정책 (B안): 결제는 자식 폰에서. 엄마 폰에선 무제한 코드 생성 허용.
+  // Ref: PRD step-08-family.md §처리 7 (B안 — 자식 결제 모델)
 
   // 토스트
   const [toastMessage, setToastMessage] = useState('');
@@ -118,16 +109,14 @@ function FamilySharePage() {
 
   async function loadData() {
     await ensureUserKey();
-    // Step 8b: 가족 슬롯 카운트도 같이 로드 (토스 결제 이력 기반)
-    // Ref: PRD step-08-family.md §처리 7 (슬롯 모델)
-    const [nick, pairs, slots] = await Promise.all([
+    // 진입 시 서버에서 페어링 매핑 fetch (옵션 2 — 데이터 흐름 동기화)
+    // Ref: vercel/api/pair/list.ts (GET /api/pair/list)
+    const [nick, pairs] = await Promise.all([
       getNickname(),
-      getPairings(),
-      getFamilySlots(),
+      refreshRecipientPairings(),
     ]);
     setNickname(nick ?? '');
     setPairings(pairs);
-    setFamilySlots(slots);
   }
 
   function showToast(msg: string) {
@@ -157,41 +146,8 @@ function FamilySharePage() {
   }, []);
 
   const handleGenerateCode = useCallback(async () => {
-    // 슬롯 게이팅: 활성 연결 수가 슬롯 한도에 도달했으면 결제 바텀시트.
-    // 연결 끊겼다 다시 연결은 무료 (슬롯 내 회전). 결제는 슬롯 자체를 사는 것.
-    // Ref: PRD step-08-family.md §처리 7 (슬롯 모델)
-    if (pairings.length >= familySlots) {
-      setFamilyExpansionSheetVisible(true);
-      return;
-    }
+    // v1 (B안): 결제는 자식 폰에서. 엄마는 무제한 코드 생성.
     await doGenerateCode();
-  }, [pairings.length, familySlots, doGenerateCode]);
-
-  // 가족 슬롯 추가 결제 핸들러 (일회성, 영구)
-  // Ref: PRD step-08-family.md §처리 7 — 슬롯 +1 후 즉시 코드 생성 진행
-  const handleFamilyExpansionPurchase = useCallback(async () => {
-    setFamilyExpansionSheetVisible(false);
-    try {
-      const result = await purchaseFamilyExpansion();
-      if (result.kind === 'success') {
-        // 결제 성공: 슬롯 카운트 토스 서버에서 재조회 + 코드 생성 진행
-        const updatedSlots = await getFamilySlots();
-        setFamilySlots(updatedSlots);
-        showToast('가족 슬롯이 추가됐어요');
-        await doGenerateCode();
-      } else if (result.kind === 'cancelled') {
-        // 취소: silent — 코드 생성 차단 (현재 슬롯 한도 유지)
-      } else {
-        // 실패: 에러 안내
-        const msg =
-          result.reason === 'unsupported_version'
-            ? '토스 앱을 최신 버전으로 업데이트해야 이용할 수 있어요'
-            : '결제에 실패했어요. 다시 시도해 주세요';
-        showToast(msg);
-      }
-    } catch {
-      showToast('결제에 실패했어요. 다시 시도해 주세요');
-    }
   }, [doGenerateCode]);
 
   // ─── 카카오톡 공유 ─────────────────────────────────────────────────────────
@@ -361,10 +317,11 @@ function FamilySharePage() {
           {pairings.length === 0 ? (
             <Text style={styles.pairingEmptyText}>아직 연결된 가족이 없어요</Text>
           ) : (
-            pairings.map((p) => (
+            pairings.map((p, idx) => (
               <View key={p.caregiverUserKey} style={styles.pairingItem} testID={`pairing-item-${p.caregiverUserKey}`}>
                 <Text style={styles.pairingNickname}>
-                  {p.careRecipientNickname ?? '가족'}
+                  {/* v1엔 자식 별명을 모름 → "가족 1", "가족 2"로 표기 (옵션 2) */}
+                  {`가족 ${idx + 1}`}
                 </Text>
                 {/* 거절 선택지: 연결 해제 버튼 */}
                 {/* Ref: references/dev-guide/design/consumer-ux-guide.md §3 */}
@@ -428,16 +385,7 @@ function FamilySharePage() {
         </TouchableWithoutFeedback>
       </Modal>
 
-      {/* ── Step 8b: 가족 확장 IAP 바텀시트 ── */}
-      {/* Ref: PRD step-08-family.md §처리 7·8 — 환불 불가 고지 + 동의 체크박스 필수 */}
-      <RefundNoticeBottomSheet
-        visible={familyExpansionSheetVisible}
-        sku="family_expansion_lifetime_v1"
-        productName="가족 추가 연결"
-        price={4900}
-        onConfirm={handleFamilyExpansionPurchase}
-        onClose={() => setFamilyExpansionSheetVisible(false)}
-      />
+      {/* v1 (B안): 결제 진입은 자식 폰(/family/connect)에서. 엄마 폰엔 결제 바텀시트 없음. */}
 
       {/* ── 토스트 ── */}
       {toastMessage !== '' && (

@@ -183,6 +183,64 @@ export async function getPairings(): Promise<PairingRecord[]> {
   }
 }
 
+/**
+ * 케어 대상(엄마) 폰 전용:
+ * 자기 userKey로 서버 KV에 매핑된 케어러(자식) 목록을 가져와 로컬 Storage에 캐싱.
+ *
+ * v1 정책 (옵션 2 — 별명 미적용):
+ *  - 자식 별명은 알 수 없음 → caregiverUserKey만 채움
+ *  - 표시 시 fallback 라벨: "가족 1", "가족 2" 등
+ *
+ * Ref: vercel/api/pair/list.ts (GET /api/pair/list)
+ */
+export async function refreshRecipientPairings(): Promise<PairingRecord[]> {
+  const recipientUserKey = await Storage.getItem(SCHEDULE_STORAGE_KEYS.USER_KEY);
+  if (!recipientUserKey) return await getPairings();
+
+  const vercelApiUrl = getVercelApiUrl();
+  if (!vercelApiUrl) return await getPairings();
+
+  try {
+    const url = new URL(`${vercelApiUrl}/api/pair/list`);
+    url.searchParams.set('recipientUserKey', recipientUserKey);
+
+    const response = await fetch(url.toString(), {
+      method: 'GET',
+      headers: { 'x-toss-user-key': recipientUserKey },
+    });
+
+    if (!response.ok) {
+      console.warn('[pairService] refreshRecipientPairings HTTP', response.status);
+      return await getPairings();
+    }
+
+    const data = (await response.json()) as { caregivers: string[] };
+    const serverCaregivers = Array.isArray(data.caregivers) ? data.caregivers : [];
+
+    // 기존 로컬과 머지 (pairedAt 보존)
+    const existing = await getPairings();
+    const existingMap = new Map(existing.map((p) => [p.caregiverUserKey, p]));
+
+    const merged: PairingRecord[] = serverCaregivers.map((caregiverUserKey) => {
+      const prior = existingMap.get(caregiverUserKey);
+      return (
+        prior ?? {
+          caregiverUserKey,
+          careRecipientUserKey: recipientUserKey,
+          // 케어 대상 폰이라 careRecipientNickname은 자기 별명. v1엔 미사용.
+          pairedAt: new Date().toISOString(),
+        }
+      );
+    });
+
+    await Storage.setItem(PAIR_STORAGE_KEYS.PAIRINGS, JSON.stringify(merged));
+    return merged;
+  } catch (err) {
+    console.warn('[pairService] refreshRecipientPairings 예외:', err);
+    return await getPairings();
+  }
+}
+
 // ─── 페어링 해제 ──────────────────────────────────────────────────────────────
 
 /**
