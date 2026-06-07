@@ -66,6 +66,11 @@ import { deleteSchedule, flushPendingQueue } from '../services/scheduleService';
 import { notifyCaregivers, flushPendingNotifyQueue } from '../services/pairService';
 import { syncMyTodayStatus } from '../services/careStatusService';
 import {
+  loadAd,
+  showAd,
+  INTERSTITIAL_AD_GROUP_ID,
+} from '../services/fullScreenAdService';
+import {
   grantDailyReward,
   getMonthlyGrantedPoints,
   isLatestResultBudgetExhausted,
@@ -91,6 +96,7 @@ import {
   ICON_EMOJI,
   DEFAULT_ICON_EMOJI,
   DEFAULT_COLOR,
+  MEAL_TIMING_LABELS,
 } from '../types/routine';
 import { type DoseRecord } from '../types/record';
 import { type BadgeKind, BADGE_META } from '../types/badge';
@@ -210,6 +216,11 @@ function HomePage() {
   const [items, setItems] = useState<RoutineWithRecord[]>([]);
   const [showRemoveAds, setShowRemoveAds] = useState(false); // loadAll 완료 후 결정
   const [adFailed, setAdFailed] = useState(false);
+
+  // 전면 광고: 체크 직후 자동 노출. 구독자(광고제거)는 미노출.
+  // Ref: references/sdk/framework/광고/IntegratedAd.md
+  const interstitialLoadedRef = useRef(false);
+  const interstitialCleanupRef = useRef<(() => void) | null>(null);
 
   // ─── Step 8b: 광고 제거 IAP 바텀시트 ────────────────────────────────────
   // Ref: PRD step-08-family.md §처리 6 "링크 탭 → 결제 바텀시트"
@@ -388,6 +399,31 @@ function HomePage() {
     setIsBudgetExhausted(budgetExhausted);
   }
 
+  // ─── 전면 광고 사전 로드 (체크 시 즉시 표시되도록) ────────────────────────
+  // 구독자(광고제거) 또는 미지원 환경에선 미로드.
+  // load → show → load 패턴: 표시 후 자동 재로드.
+  const preloadInterstitial = useCallback(() => {
+    if (showRemoveAds === false) return; // showRemoveAds=false면 구독자 → 광고 안 띄움
+    const result = loadAd(
+      INTERSTITIAL_AD_GROUP_ID,
+      () => {
+        interstitialLoadedRef.current = true;
+      },
+      (err) => console.warn('[HomePage] 전면 광고 로드 실패', err),
+    );
+    if (result.kind === 'loaded') {
+      interstitialCleanupRef.current = result.cleanup;
+    }
+  }, [showRemoveAds]);
+
+  useEffect(() => {
+    preloadInterstitial();
+    return () => {
+      interstitialCleanupRef.current?.();
+      interstitialCleanupRef.current = null;
+    };
+  }, [preloadInterstitial]);
+
   // ─── Pull 방식 가족 현황: items/nickname 변경 시 Vercel KV에 sync ─────
   // Ref: PRD step-08-family.md §처리 4 "Pull 방식 — 케어 대상이 체크 시 KV 갱신"
   // 알림(notify) 비활성 대안. 가족 폰이 미니앱 진입 시 fetch해서 표시.
@@ -465,6 +501,25 @@ function HomePage() {
             // 실패해도 로컬 체크 유지 — fire-and-forget
             // Ref: step-08-family.md §검수 "Vercel Functions 호출 실패해도 로컬 체크 유지"
           });
+
+          // 체크 직후 전면 광고 노출 — 구독자(showRemoveAds=false)는 스킵.
+          // 광고 로드 안 됐으면 silent skip. 비동기 fire-and-forget이라 토스트 등 후속 흐름은 블로킹 안 됨.
+          // Ref: references/sdk/framework/광고/IntegratedAd.md
+          if (showRemoveAds && interstitialLoadedRef.current) {
+            interstitialLoadedRef.current = false;
+            void showAd(INTERSTITIAL_AD_GROUP_ID)
+              .then((result) => {
+                if (result.kind === 'failed') {
+                  console.warn('[HomePage] 전면 광고 표시 실패', result.reason);
+                }
+                // 다음 광고 미리 로드 (load → show → load 패턴)
+                preloadInterstitial();
+              })
+              .catch((err) => {
+                console.warn('[HomePage] 전면 광고 예외', err);
+                preloadInterstitial();
+              });
+          }
         }
 
         // 모든 회차 CHECKED 달성 시 완료 토스트 1회 + 스트릭/배지 재계산
@@ -1259,7 +1314,9 @@ function RoutineCard({ item, onPress, onLongPress }: RoutineCardProps) {
           {routine.label}
         </Text>
         <Text style={[styles.cardTime, isChecked && styles.cardTimeChecked]}>
-          {routine.time}
+          {routine.mealTiming
+            ? `${routine.time} (${MEAL_TIMING_LABELS[routine.mealTiming]})`
+            : routine.time}
         </Text>
         {isMissed && (
           <Text style={styles.missedBadge} testID={`missed-badge-${routine.id}`}>
