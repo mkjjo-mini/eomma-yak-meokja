@@ -694,47 +694,49 @@ function RoutineAddPage() {
           </View>
         )}
 
-        {/* 보상형 광고 시청 후 등록 — 선택 옵션 (구독자·미지원 환경에서는 미노출) */}
+        {/* 미구독자: 광고 보고 등록 버튼만 노출 (광고 시청 결과와 무관하게 등록 진행) */}
         {!isEditMode && !isAdRemoved && (
           <TouchableOpacity
             style={[
               styles.adSaveButton,
-              (!isRewardAdLoaded || isWatchingAd || isSaving) && styles.adSaveButtonDisabled,
+              (isWatchingAd || isSaving) && styles.adSaveButtonDisabled,
             ]}
             onPress={() => void handleSaveWithAd()}
-            disabled={!isRewardAdLoaded || isWatchingAd || isSaving}
+            disabled={isWatchingAd || isSaving}
             accessibilityRole="button"
-            accessibilityLabel="광고 보고 등록해요"
+            accessibilityLabel="회차 등록해요"
             testID="save-with-ad-button"
           >
             <Text style={styles.adSaveButtonText}>
               {isWatchingAd
                 ? '광고 보는 중이에요…'
-                : isRewardAdLoaded
-                  ? '📺 광고 보고 등록하기'
-                  : '광고 준비 중이에요…'}
+                : isSaving
+                  ? '등록 중이에요…'
+                  : '📺 광고 보고 등록하기'}
             </Text>
           </TouchableOpacity>
         )}
 
-        {/* 저장 버튼 */}
-        <TouchableOpacity
-          style={[styles.saveButton, isSaving && styles.saveButtonDisabled]}
-          onPress={handleSave}
-          disabled={isSaving}
-          accessibilityRole="button"
-          accessibilityLabel="회차 등록해요"
-        >
-          <Text style={styles.saveButtonText}>
-            {isSaving
-              ? isEditMode
-                ? '수정 중이에요...'
-                : '등록 중이에요...'
-              : isEditMode
-                ? '수정해요'
-                : '등록해요'}
-          </Text>
-        </TouchableOpacity>
+        {/* 구독자 또는 수정 모드: 일반 등록 버튼 */}
+        {(isEditMode || isAdRemoved) && (
+          <TouchableOpacity
+            style={[styles.saveButton, isSaving && styles.saveButtonDisabled]}
+            onPress={handleSave}
+            disabled={isSaving}
+            accessibilityRole="button"
+            accessibilityLabel="회차 등록해요"
+          >
+            <Text style={styles.saveButtonText}>
+              {isSaving
+                ? isEditMode
+                  ? '수정 중이에요...'
+                  : '등록 중이에요...'
+                : isEditMode
+                  ? '수정해요'
+                  : '등록해요'}
+            </Text>
+          </TouchableOpacity>
+        )}
       </ScrollView>
 
       {/* 토스트 메시지 */}
