@@ -39,7 +39,26 @@ import {
 } from '../../services/pairService';
 import type { PairingRecord } from '../../types/pair';
 import { getNickname } from '../../services/storageService';
-import { ensureUserKey } from '../../services/authService';
+import { ensureUserKey, ensureUserKeyWithDetails } from '../../services/authService';
+
+function userKeyFailureMessage(
+  result: Awaited<ReturnType<typeof ensureUserKeyWithDetails>>,
+): string {
+  switch (result.kind) {
+    case 'unsupported':
+      return '토스 앱이 최신 버전이 아니에요. 업데이트 후 다시 시도해주세요.';
+    case 'no_api_url':
+      return '서버 주소가 설정되어 있지 않아요. 잠시 후 다시 시도해주세요.';
+    case 'login_failed':
+      return `토스 로그인에 실패했어요: ${result.reason}`;
+    case 'exchange_failed':
+      return `서버 인증에 실패했어요 (${result.status}). 잠시 후 다시 시도해주세요.`;
+    case 'no_user_key_in_response':
+      return '계정 정보를 가져오지 못했어요. 잠시 후 다시 시도해주세요.';
+    case 'ok':
+      return '';
+  }
+}
 
 export const Route = createRoute('/family/share', {
   validateParams: (params) => params,
@@ -134,6 +153,12 @@ function FamilySharePage() {
     setIsGenerating(true);
     setErrorMessage('');
     try {
+      // 코드 생성 직전에 userKey 보장 — 실패 시 reason별 메시지로 사용자 안내.
+      const auth = await ensureUserKeyWithDetails();
+      if (auth.kind !== 'ok') {
+        setErrorMessage(userKeyFailureMessage(auth));
+        return;
+      }
       const result = await generatePairingCode();
       setCode(result.code);
       setExpiresAt(result.expiresAt);

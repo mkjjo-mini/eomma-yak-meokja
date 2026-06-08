@@ -140,33 +140,36 @@ export async function detectLogoutAndClear(): Promise<void> {
  *
  * Ref: references/dev-guide/design/consumer-ux-guide.md §강제 로그인 금지
  */
-export async function ensureUserKey(): Promise<string | null> {
-  // 이미 저장된 userKey가 있으면 재사용
-  const saved = await getSavedUserKey();
-  if (saved) return saved;
+/**
+ * userKey 획득 시도 결과 — 실패 원인 진단용 discriminated union.
+ * 사용자 안내 메시지를 단계별로 분기하기 위해 silent null 대신 구체적 reason 반환.
+ */
+export type EnsureUserKeyResult =
+  | { kind: 'ok'; userKey: string }
+  | { kind: 'unsupported' }
+  | { kind: 'no_api_url' }
+  | { kind: 'login_failed'; reason: string }
+  | { kind: 'exchange_failed'; status: number }
+  | { kind: 'no_user_key_in_response' };
 
-  // SDK 버전 확인
-  // Ref: references/sdk/framework/환경확인/isMinVersionSupported.md
-  // 시그니처: { android: 'X.Y.Z' | 'always' | 'never', ios: 'X.Y.Z' | 'always' | 'never' }
+/**
+ * 진단 정보 포함 버전 — share/connect에서 사용자에게 정확한 실패 원인 안내.
+ */
+export async function ensureUserKeyWithDetails(): Promise<EnsureUserKeyResult> {
+  const saved = await getSavedUserKey();
+  if (saved) return { kind: 'ok', userKey: saved };
+
   if (!isMinVersionSupported({ android: 'always', ios: 'always' })) {
-    // 대체 처리: 알림 기능 비활성화 (사용자 흐름 차단 없음)
-    console.warn('[authService] Toss 앱 버전 미지원 — userKey 획득 불가');
-    return null;
+    return { kind: 'unsupported' };
   }
 
   const vercelApiUrl = getVercelApiUrl();
   if (!vercelApiUrl) {
-    console.warn('[authService] VERCEL_API_URL 미설정 — userKey 획득 불가');
-    return null;
+    return { kind: 'no_api_url' };
   }
 
   try {
-    // Ref: references/sdk/framework/로그인/appLogin.md §예제
     const { authorizationCode, referrer } = await appLogin();
-
-    // authorizationCode를 서버로 전송 → 토큰 교환 → userKey 반환
-    // Ref: references/sdk/framework/로그인/appLogin.md
-    //   "인가 코드를 받은 뒤의 토큰 교환은 반드시 서버에서 처리"
     const response = await fetch(`${vercelApiUrl}/api/auth/exchange`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -174,22 +177,25 @@ export async function ensureUserKey(): Promise<string | null> {
     });
 
     if (!response.ok) {
-      console.warn('[authService] 토큰 교환 실패:', response.status);
-      return null;
+      return { kind: 'exchange_failed', status: response.status };
     }
 
     const data = (await response.json()) as { userKey?: string };
     if (!data.userKey) {
-      console.warn('[authService] userKey 미포함 응답');
-      return null;
+      return { kind: 'no_user_key_in_response' };
     }
 
-    // Storage에 영구 저장
     await Storage.setItem(SCHEDULE_STORAGE_KEYS.USER_KEY, data.userKey);
-    return data.userKey;
+    return { kind: 'ok', userKey: data.userKey };
   } catch (err) {
-    // 네트워크 오류, 로그인 취소 등 — 조용히 처리
-    console.warn('[authService] ensureUserKey 실패:', err);
-    return null;
+    const reason = err instanceof Error ? err.message : String(err);
+    return { kind: 'login_failed', reason };
   }
+}
+
+export async function ensureUserKey(): Promise<string | null> {
+  const result = await ensureUserKeyWithDetails();
+  if (result.kind === 'ok') return result.userKey;
+  console.warn('[authService] ensureUserKey 실패:', result.kind);
+  return null;
 }
