@@ -394,27 +394,17 @@ function RoutineAddPage() {
       return;
     }
     setIsWatchingAd(true);
-    let watchedToCompletion = false;
     try {
       // 광고 결과는 로깅만 — 등록은 무조건 진행
       const result = await showAd(REWARDED_AD_GROUP_ID);
       if (result.kind === 'failed') {
         console.warn('[add] 보상형 광고 표시 실패', result.reason);
       }
-      if (result.kind === 'rewarded') {
-        watchedToCompletion = true;
-      }
     } finally {
       setIsWatchingAd(false);
       setIsRewardAdLoaded(false);
-      // 광고 끝까지 시청 시 응원 메시지 — 명확한 보상으로 인지되게
-      // Ref: 비게임 출시 가이드 §인앱 광고 "리워드 광고를 끝까지 시청하면 보상이 정상 지급"
-      if (watchedToCompletion) {
-        showToast('응원해주셔서 고마워요 🙏');
-        // 응원 토스트가 등록 완료 토스트에 곧바로 덮이지 않게 잠시 대기
-        await new Promise((resolve) => setTimeout(resolve, 1200));
-      }
       // 광고 결과와 무관하게 등록 진행 (B안: 선택형)
+      // 등록 완료 토스트는 handleSave 내부에서 표시
       await handleSave();
     }
   }
