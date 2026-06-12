@@ -907,9 +907,21 @@ function HomePage() {
               )
             ) : (
               totalCount > 0 && (
-                <Text style={styles.headerSubtitle}>
-                  {`${totalCount}개 중 ${checkedCount}개 체크`}
-                </Text>
+                <View style={styles.headerSubtitleRow}>
+                  <Text style={styles.headerSubtitle}>
+                    {`${totalCount}개 중 ${checkedCount}개 체크`}
+                  </Text>
+                  <Text style={styles.headerSubtitleDot}>·</Text>
+                  <TouchableOpacity
+                    onPress={() => navigation.navigate('/routines/list')}
+                    accessibilityRole="button"
+                    accessibilityLabel="전체 회차 보기"
+                    testID="header-view-all-routines"
+                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                  >
+                    <Text style={styles.headerLinkText}>전체 보기</Text>
+                  </TouchableOpacity>
+                </View>
               )
             )}
           </TouchableOpacity>
@@ -1853,6 +1865,20 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: '#6B7684',
     fontWeight: '400',
+  },
+  headerSubtitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  headerSubtitleDot: {
+    fontSize: 16,
+    color: '#B0B8C1',
+    marginHorizontal: 6,
+  },
+  headerLinkText: {
+    fontSize: 14,
+    color: '#FF6B6B',
+    fontWeight: '600',
   },
 
   // 배지 버튼 (헤더 우측)
