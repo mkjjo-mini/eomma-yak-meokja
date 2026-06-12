@@ -965,9 +965,18 @@ function HomePage() {
       {/* MISSED 배너는 본인 모드에서만 (가족 모드에선 자녀가 조치할 수 없으니 미노출) */}
       {!isFamilyMode && missedBannerCount > 0 && !missedBannerDismissed && (
         <View style={styles.missedBanner} testID="missed-banner">
-          <Text style={styles.missedBannerText} testID="missed-banner-text">
-            {`어제 ${missedBannerCount}개 회차를 놓쳤어요`}
-          </Text>
+          {/* 텍스트 영역 탭 → 달력으로 이동해 놓친 회차 확인 */}
+          <TouchableOpacity
+            style={styles.missedBannerTextArea}
+            onPress={() => navigation.navigate('/calendar')}
+            accessibilityRole="button"
+            accessibilityLabel={`어제 ${missedBannerCount}개 회차를 놓쳤어요. 달력으로 이동해요.`}
+            testID="missed-banner-text-button"
+          >
+            <Text style={styles.missedBannerText} testID="missed-banner-text">
+              {`어제 ${missedBannerCount}개 회차를 놓쳤어요`}
+            </Text>
+          </TouchableOpacity>
           {/* 거절 선택지 필수 — 다크패턴 §3 "닫기 선택지 있음" */}
           <TouchableOpacity
             style={styles.missedBannerClose}
@@ -1891,8 +1900,11 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     minHeight: 44,
   },
-  missedBannerText: {
+  missedBannerTextArea: {
     flex: 1,
+    paddingVertical: 4,
+  },
+  missedBannerText: {
     fontSize: 14,
     color: '#E07A00',
     fontWeight: '500',
