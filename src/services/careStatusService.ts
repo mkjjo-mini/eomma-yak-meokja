@@ -61,14 +61,7 @@ export type CareStatusEntry = {
 /** 사진 base64의 안전한 최대 사이즈 (전송·KV 보호). 초과 시 sync 단계에서 skip. */
 const MAX_PHOTO_BASE64_BYTES = 500 * 1024;
 
-/** 런타임 시점에 env 읽기 (pairService와 동일 패턴) */
-function getVercelApiUrl(): string {
-  return (
-    (typeof process !== 'undefined' && process.env?.EXPO_PUBLIC_VERCEL_API_URL) ||
-    (typeof process !== 'undefined' && process.env?.VERCEL_API_URL) ||
-    ''
-  );
-}
+import { getVercelApiUrl } from './config';
 
 // ─── 케어 대상 폰: 오늘 상태 KV 저장 ────────────────────────────────────────
 

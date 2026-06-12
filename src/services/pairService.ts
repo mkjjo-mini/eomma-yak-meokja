@@ -37,14 +37,7 @@ import { SCHEDULE_STORAGE_KEYS } from '../types/schedule';
  */
 const NOTIFY_ENABLED = false;
 
-/** 런타임 시점에 env 읽기 */
-function getVercelApiUrl(): string {
-  return (
-    (typeof process !== 'undefined' && process.env?.EXPO_PUBLIC_VERCEL_API_URL) ||
-    (typeof process !== 'undefined' && process.env?.VERCEL_API_URL) ||
-    ''
-  );
-}
+import { getVercelApiUrl } from './config';
 
 // ─── 페어링 코드 생성 (케어 대상 폰) ──────────────────────────────────────────
 

@@ -19,14 +19,7 @@ import { STORAGE_KEYS as ROUTINE_STORAGE_KEYS } from '../types/routine';
 import { PAIR_STORAGE_KEYS } from '../types/pair';
 import { IAP_STORAGE_KEYS } from './iapService';
 
-/** 런타임 시점에 env 읽기 — 테스트에서 beforeEach 세팅 반영을 위해 함수로 */
-function getVercelApiUrl(): string {
-  return (
-    (typeof process !== 'undefined' && process.env?.EXPO_PUBLIC_VERCEL_API_URL) ||
-    (typeof process !== 'undefined' && process.env?.VERCEL_API_URL) ||
-    ''
-  );
-}
+import { getVercelApiUrl } from './config';
 
 /**
  * 저장된 userKey 조회.
