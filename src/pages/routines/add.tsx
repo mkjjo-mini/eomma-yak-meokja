@@ -17,7 +17,7 @@
  * 네트워크(Vercel 스케줄): 로컬 저장 후 백그라운드 동기화. 실패 시 재시도 큐.
  */
 import { createRoute, useNavigation, useBackEvent } from '@granite-js/react-native';
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Modal,
   ScrollView,
@@ -198,6 +198,15 @@ function RoutineAddPage() {
       medications.length > 0
     );
   }, [label, time, frequency, selectedWeekdays, photoDataUri, medications]);
+
+  // 필수값(레이블·시간·주간이면 요일) 모두 채워진 경우만 등록 가능.
+  // 광고 보고 등록하기에서 광고 본 뒤 검증 실패로 시간 낭비하는 것 방지.
+  const isFormValid = useMemo(() => {
+    if (!validateLabel(label).valid) return false;
+    if (!validateTime(time).valid) return false;
+    if (frequency === 'weekly' && !validateWeekdays(selectedWeekdays).valid) return false;
+    return true;
+  }, [label, time, frequency, selectedWeekdays]);
 
   // ─── 뒤로가기 (다크패턴 금지: 차단 아닌 확인만) ─────────────────────────
 
@@ -724,10 +733,10 @@ function RoutineAddPage() {
           <TouchableOpacity
             style={[
               styles.adSaveButton,
-              (isWatchingAd || isSaving) && styles.adSaveButtonDisabled,
+              (isWatchingAd || isSaving || !isFormValid) && styles.adSaveButtonDisabled,
             ]}
             onPress={() => void handleSaveWithAd()}
-            disabled={isWatchingAd || isSaving}
+            disabled={isWatchingAd || isSaving || !isFormValid}
             accessibilityRole="button"
             accessibilityLabel="회차 등록해요"
             testID="save-with-ad-button"
@@ -745,9 +754,12 @@ function RoutineAddPage() {
         {/* 구독자 또는 수정 모드: 일반 등록 버튼 */}
         {(isEditMode || isAdRemoved) && (
           <TouchableOpacity
-            style={[styles.saveButton, isSaving && styles.saveButtonDisabled]}
+            style={[
+              styles.saveButton,
+              (isSaving || !isFormValid) && styles.saveButtonDisabled,
+            ]}
             onPress={handleSave}
-            disabled={isSaving}
+            disabled={isSaving || !isFormValid}
             accessibilityRole="button"
             accessibilityLabel="회차 등록해요"
           >

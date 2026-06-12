@@ -126,17 +126,18 @@ describe('회차 등록 헤더', () => {
 // ─── 필수 필드 유효성 ─────────────────────────────────────────────────────────
 
 describe('회차 등록 필수 필드', () => {
-  it('레이블 빈값으로 저장 시 차단되어야 한다', async () => {
+  it('레이블 빈값일 때 등록 버튼이 비활성화되어야 한다', async () => {
     // PRD §검수: "회차 레이블이 빈값이면 저장 차단되어야 한다"
+    // 광고 보고 등록하기 후 검증 실패로 시간 낭비 방지 — 버튼 비활성으로 사전 차단.
     renderPage();
     await waitFor(() => expect(screen.getByLabelText('복용 시간 입력 (HH:MM)')).toBeTruthy());
 
     fireEvent.changeText(screen.getByLabelText('복용 시간 입력 (HH:MM)'), '09:00');
-    fireEvent.press(screen.getByRole('button', { name: '회차 등록해요' }));
-
-    await waitFor(() => {
-      expect(screen.getByText('회차 이름을 입력해요')).toBeTruthy();
-    });
+    const saveBtn = screen.getByRole('button', { name: '회차 등록해요' });
+    expect(
+      (saveBtn.props as { accessibilityState?: { disabled?: boolean } })
+        .accessibilityState?.disabled,
+    ).toBe(true);
     expect(mockNavigate).not.toHaveBeenCalled();
   });
 
@@ -151,17 +152,17 @@ describe('회차 등록 필수 필드', () => {
     expect(value.length).toBeLessThanOrEqual(15);
   });
 
-  it('시간 미입력 시 저장 차단되어야 한다', async () => {
+  it('시간 미입력 시 등록 버튼이 비활성화되어야 한다', async () => {
     // PRD §검수: "복용 시간 미입력 시 저장 차단되어야 한다"
     renderPage();
     await waitFor(() => expect(screen.getByLabelText('회차 이름 입력')).toBeTruthy());
 
     fireEvent.changeText(screen.getByLabelText('회차 이름 입력'), '아침약');
-    fireEvent.press(screen.getByRole('button', { name: '회차 등록해요' }));
-
-    await waitFor(() => {
-      expect(screen.getByText('복용 시간을 입력해요')).toBeTruthy();
-    });
+    const saveBtn = screen.getByRole('button', { name: '회차 등록해요' });
+    expect(
+      (saveBtn.props as { accessibilityState?: { disabled?: boolean } })
+        .accessibilityState?.disabled,
+    ).toBe(true);
   });
 
   it('주기 미선택 시 기본값 "매일"이 선택되어 있어야 한다', async () => {
@@ -175,7 +176,7 @@ describe('회차 등록 필수 필드', () => {
     ).toBe(true);
   });
 
-  it('특정 요일 선택 후 요일 미선택 시 저장 차단되어야 한다', async () => {
+  it('특정 요일 선택 후 요일 미선택 시 등록 버튼이 비활성화되어야 한다', async () => {
     // PRD §검수: "특정 요일 선택 시 요일이 1개 이상 선택되어야 한다"
     renderPage();
     await waitFor(() => expect(screen.getByLabelText('회차 이름 입력')).toBeTruthy());
@@ -183,11 +184,12 @@ describe('회차 등록 필수 필드', () => {
     fireEvent.changeText(screen.getByLabelText('회차 이름 입력'), '아침약');
     fireEvent.changeText(screen.getByLabelText('복용 시간 입력 (HH:MM)'), '09:00');
     fireEvent.press(screen.getByRole('radio', { name: '특정 요일' }));
-    fireEvent.press(screen.getByRole('button', { name: '회차 등록해요' }));
 
-    await waitFor(() => {
-      expect(screen.getByText('요일을 1개 이상 선택해요')).toBeTruthy();
-    });
+    const saveBtn = screen.getByRole('button', { name: '회차 등록해요' });
+    expect(
+      (saveBtn.props as { accessibilityState?: { disabled?: boolean } })
+        .accessibilityState?.disabled,
+    ).toBe(true);
   });
 });
 
