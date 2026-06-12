@@ -51,6 +51,7 @@ import { AlertModal, type AlertButton } from '../../components/AlertModal';
 import { isCameraSupported, takePhoto, pickFromAlbum } from '../../services/cameraService';
 import { ensureUserKey } from '../../services/authService';
 import { upsertSchedule } from '../../services/scheduleService';
+import { getKSTWeekday } from '../../services/recordService';
 import {
   COLOR_PALETTE,
   DEFAULT_COLOR,
@@ -518,9 +519,26 @@ function RoutineAddPage() {
         }
       })();
 
-      showToast(isEditMode ? '수정했어요' : '등록 완료');
-      // 저장 성공 → 홈으로 이동
-      setTimeout(() => navigation.navigate('/'), 600);
+      // 주간 회차인데 오늘 요일이 빠진 경우, 홈에 안 보여서 사용자가 '삭제됐다'고
+      // 오해하지 않도록 명시적 안내. 다음 도래 요일까지 회차는 살아있음.
+      const todayWeekday = getKSTWeekday();
+      const hiddenToday =
+        routine.frequency === 'weekly' &&
+        Array.isArray(routine.weekdays) &&
+        !routine.weekdays.includes(todayWeekday);
+
+      if (hiddenToday) {
+        const dayLabels = (routine.weekdays ?? [])
+          .slice()
+          .sort((a, b) => a - b)
+          .map((d) => WEEKDAY_LABELS[d])
+          .join('·');
+        showToast(`${dayLabels}요일에 보여요`);
+      } else {
+        showToast(isEditMode ? '수정했어요' : '등록 완료');
+      }
+      // 저장 성공 → 홈으로 이동 (안내 토스트 인지할 시간 확보)
+      setTimeout(() => navigation.navigate('/'), hiddenToday ? 1500 : 600);
     } catch {
       // Ref: step-02 §아키텍처 "Storage 쓰기 실패 시 에러 토스트 (크래시 없음)"
       showToast('저장에 실패했어요. 다시 시도해요');
