@@ -142,7 +142,7 @@ function RoutineListPage() {
       <View style={styles.header}>
         <Text style={styles.headerTitle}>전체 회차</Text>
         <Text style={styles.headerSubtitle}>
-          탭하면 수정해요. 길게 눌러서 삭제할 수 있어요.
+          탭하면 수정해요. 더보기(⋯)로 삭제할 수 있어요.
         </Text>
       </View>
 
@@ -169,30 +169,41 @@ function RoutineListPage() {
           keyExtractor={(r) => r.id}
           contentContainerStyle={styles.listContent}
           renderItem={({ item }) => (
-            <TouchableOpacity
-              style={styles.card}
-              onPress={() => handleEdit(item)}
-              onLongPress={() => handleLongPress(item)}
-              accessibilityRole="button"
-              accessibilityLabel={`${item.label} 회차 수정`}
-              testID={`routine-list-item-${item.id}`}
-            >
-              <View style={styles.cardTimeBlock}>
-                <Text style={styles.cardTime}>{item.time}</Text>
-                {item.mealTiming && (
-                  <Text style={styles.cardMeal}>
-                    {MEAL_TIMING_LABELS[item.mealTiming]}
+            <View style={styles.card}>
+              <TouchableOpacity
+                style={styles.cardMain}
+                onPress={() => handleEdit(item)}
+                accessibilityRole="button"
+                accessibilityLabel={`${item.label} 회차 수정`}
+                testID={`routine-list-item-${item.id}`}
+              >
+                <View style={styles.cardTimeBlock}>
+                  <Text style={styles.cardTime}>{item.time}</Text>
+                  {item.mealTiming && (
+                    <Text style={styles.cardMeal}>
+                      {MEAL_TIMING_LABELS[item.mealTiming]}
+                    </Text>
+                  )}
+                </View>
+                <View style={styles.cardBody}>
+                  <Text style={styles.cardLabel} numberOfLines={1}>
+                    {item.label}
                   </Text>
-                )}
-              </View>
-              <View style={styles.cardBody}>
-                <Text style={styles.cardLabel} numberOfLines={1}>
-                  {item.label}
-                </Text>
-                <Text style={styles.cardFrequency}>{formatFrequency(item)}</Text>
-              </View>
-              <Text style={styles.cardArrow}>›</Text>
-            </TouchableOpacity>
+                  <Text style={styles.cardFrequency}>{formatFrequency(item)}</Text>
+                </View>
+              </TouchableOpacity>
+              {/* ⋯ 버튼 — 메뉴(수정/삭제) 열기. long-press 없이도 발견 가능. */}
+              <TouchableOpacity
+                style={styles.cardMoreButton}
+                onPress={() => handleLongPress(item)}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                accessibilityRole="button"
+                accessibilityLabel={`${item.label} 더보기`}
+                testID={`routine-list-more-${item.id}`}
+              >
+                <Text style={styles.cardMoreText}>⋯</Text>
+              </TouchableOpacity>
+            </View>
           )}
         />
       )}
@@ -362,9 +373,27 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     backgroundColor: '#F9FAFB',
     borderRadius: 12,
+    marginBottom: 10,
+  },
+  cardMain: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
     paddingHorizontal: 16,
     paddingVertical: 14,
-    marginBottom: 10,
+  },
+  cardMoreButton: {
+    paddingHorizontal: 14,
+    paddingVertical: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    minWidth: 44,
+    minHeight: 44,
+  },
+  cardMoreText: {
+    fontSize: 22,
+    color: '#8B95A1',
+    fontWeight: '700',
   },
   cardTimeBlock: {
     alignItems: 'center',
@@ -394,12 +423,6 @@ const styles = StyleSheet.create({
     color: '#6B7684',
     marginTop: 3,
   },
-  cardArrow: {
-    fontSize: 20,
-    color: '#B0B8C1',
-    marginLeft: 8,
-  },
-
   // 메뉴 모달
   menuOverlay: {
     flex: 1,
