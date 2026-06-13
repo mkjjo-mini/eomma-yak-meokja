@@ -34,6 +34,27 @@ type TossTokenResponse = {
   accessToken?: string;
 };
 
+/**
+ * Toss accessToken(JWT)의 sub 클레임을 userKey로 추출.
+ * Toss 응답은 userKey 필드를 별도로 주지 않고 JWT 안에 담아 보냄 (sub).
+ *
+ * JWT 형식: header.payload.signature (각각 base64url)
+ * payload만 디코드 — 서명 검증은 mTLS로 채널 보호 + Toss 서버만 발급하므로 불필요.
+ */
+function extractUserKeyFromJwt(jwt: string): string | null {
+  const parts = jwt.split('.');
+  if (parts.length < 2) return null;
+  try {
+    // base64url → base64
+    const payloadB64 = parts[1].replace(/-/g, '+').replace(/_/g, '/');
+    const json = Buffer.from(payloadB64, 'base64').toString('utf8');
+    const payload = JSON.parse(json) as { sub?: string };
+    return payload.sub ?? null;
+  } catch {
+    return null;
+  }
+}
+
 function postWithMtls(
   body: string,
   cert: string,
@@ -121,13 +142,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       });
     }
 
-    // SUCCESS shape (success.userKey) 우선, 호환 위해 평면 userKey도 fallback
-    const userKey = data.success?.userKey ?? data.userKey;
+    // userKey 추출 우선순위:
+    //  1. success.userKey (혹시 미래에 평면 필드로 바뀔 경우)
+    //  2. accessToken(JWT)의 sub 클레임 (현재 실제 응답)
+    //  3. 평면 userKey (구버전 호환)
+    const accessToken = data.success?.accessToken ?? data.accessToken;
+    const userKey =
+      data.success?.userKey ??
+      (accessToken ? extractUserKeyFromJwt(accessToken) : null) ??
+      data.userKey;
 
     if (!userKey) {
-      console.error('[auth/exchange] userKey 미포함 응답:', body);
+      console.error('[auth/exchange] userKey 추출 실패:', body);
       return res.status(502).json({
-        error: 'userKey 미포함 응답',
+        error: 'userKey 추출 실패',
         rawBody: body.slice(0, 500),
       });
     }
