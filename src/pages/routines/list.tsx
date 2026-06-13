@@ -334,9 +334,6 @@ function RoutineListPage() {
                   testID="action-discontinue"
                 >
                   <Text style={styles.discontinueActionTitle}>오늘부터 그만 보기</Text>
-                  <Text style={styles.discontinueActionSubtitle}>
-                    과거 복약 기록과 통계는 그대로 유지돼요
-                  </Text>
                 </TouchableOpacity>
                 <TouchableOpacity
                   style={styles.deleteAllAction}
@@ -344,10 +341,7 @@ function RoutineListPage() {
                   accessibilityRole="button"
                   testID="action-delete-all"
                 >
-                  <Text style={styles.deleteAllActionTitle}>전부 삭제하기</Text>
-                  <Text style={styles.deleteAllActionSubtitle}>
-                    과거 복약 기록까지 모두 사라져요. 통계에 영향이 있어요.
-                  </Text>
+                  <Text style={styles.deleteAllActionTitle}>기록 전부 삭제하기</Text>
                 </TouchableOpacity>
                 <TouchableOpacity
                   style={styles.deleteCloseAction}
@@ -559,8 +553,8 @@ const styles = StyleSheet.create({
   discontinueAction: {
     backgroundColor: '#F2F4F6',
     borderRadius: 12,
-    paddingHorizontal: 16,
-    paddingVertical: 14,
+    paddingVertical: 16,
+    alignItems: 'center',
     marginBottom: 10,
   },
   discontinueActionTitle: {
@@ -568,27 +562,17 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: '#191F28',
   },
-  discontinueActionSubtitle: {
-    fontSize: 13,
-    color: '#6B7684',
-    marginTop: 4,
-  },
   deleteAllAction: {
     backgroundColor: '#FFF1F0',
     borderRadius: 12,
-    paddingHorizontal: 16,
-    paddingVertical: 14,
+    paddingVertical: 16,
+    alignItems: 'center',
     marginBottom: 10,
   },
   deleteAllActionTitle: {
     fontSize: 15,
     fontWeight: '700',
     color: '#F04438',
-  },
-  deleteAllActionSubtitle: {
-    fontSize: 13,
-    color: '#B25344',
-    marginTop: 4,
   },
   deleteCloseAction: {
     paddingVertical: 14,
