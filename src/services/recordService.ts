@@ -286,9 +286,15 @@ export async function toggleCheck(
 export function filterTodayRoutines(
   routines: DoseRoutine[],
   todayWeekday: number,
+  todayDate?: string,
 ): DoseRoutine[] {
   return routines
     .filter((r) => {
+      // 그만 보기 처리된 회차: discontinuedAt <= 오늘이면 미노출
+      // todayDate 미전달 시 그만 보기 필터 건너뜀 (기존 호출처 호환)
+      if (r.discontinuedAt && todayDate && todayDate >= r.discontinuedAt) {
+        return false;
+      }
       if (r.frequency === 'daily') return true;
       if (r.frequency === 'weekly') {
         return r.weekdays?.includes(todayWeekday) ?? false;

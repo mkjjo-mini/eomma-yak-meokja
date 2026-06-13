@@ -40,6 +40,12 @@ export type DoseRoutine = {
   /** 구성 약 상세 — 선택 (0개도 OK) */
   medications?: MedicationItem[];
   createdAt: string;
+  /**
+   * 그만 보기 시작 날짜 (KST 'YYYY-MM-DD').
+   * 이 날짜 이후로 오늘 목록·달력 미노출. 과거 기록은 보존.
+   * 미설정 = 활성.
+   */
+  discontinuedAt?: string;
 };
 
 export const MEAL_TIMING_LABELS: Record<MealTiming, string> = {

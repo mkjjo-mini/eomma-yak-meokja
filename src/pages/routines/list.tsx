@@ -20,7 +20,7 @@ import {
   View,
 } from 'react-native';
 import { getRoutines } from '../../services/storageService';
-import { getRecords } from '../../services/recordService';
+import { getRecords, getKSTDateString } from '../../services/recordService';
 import { deleteSchedule } from '../../services/scheduleService';
 import { getSavedUserKey } from '../../services/authService';
 import type { DoseRoutine } from '../../types/routine';
@@ -137,6 +137,54 @@ function RoutineListPage() {
     setDeleteTargetRoutine(null);
   }
 
+  /**
+   * 오늘부터 그만 보기 — soft delete. 과거 기록 보존.
+   * discontinuedAt = 오늘(KST) → filterTodayRoutines가 자동 필터.
+   */
+  async function handleDiscontinueConfirm() {
+    if (!deleteTargetRoutine) return;
+    setDeleteConfirmVisible(false);
+
+    try {
+      const todayDate = getKSTDateString();
+      const all = await getRoutines();
+      const updated = all.map((r) =>
+        r.id === deleteTargetRoutine.id ? { ...r, discontinuedAt: todayDate } : r,
+      );
+      await Storage.setItem('routines', JSON.stringify(updated));
+
+      // 오늘 PENDING 레코드 정리 (체크된 건 보존)
+      const records = await getRecords();
+      const updatedRecords = records.filter(
+        (rec) =>
+          !(
+            rec.routineId === deleteTargetRoutine.id &&
+            rec.date === todayDate &&
+            rec.status === 'PENDING'
+          ),
+      );
+      await Storage.setItem('records', JSON.stringify(updatedRecords));
+
+      void (async () => {
+        try {
+          const userKey = await getSavedUserKey();
+          if (userKey) {
+            await deleteSchedule(deleteTargetRoutine.id, userKey);
+          }
+        } catch (err) {
+          console.warn('[list] 스케줄 삭제 동기화 실패 (재시도 큐 적재됨):', err);
+        }
+      })();
+
+      showToast('오늘부터 안 보여요. 과거 기록은 보존돼요');
+      await load();
+    } catch {
+      showToast('처리에 실패했어요. 다시 시도해요');
+    }
+
+    setDeleteTargetRoutine(null);
+  }
+
   return (
     <View style={styles.container} testID="routine-list-page">
       <View style={styles.header}>
@@ -186,10 +234,20 @@ function RoutineListPage() {
                   )}
                 </View>
                 <View style={styles.cardBody}>
-                  <Text style={styles.cardLabel} numberOfLines={1}>
+                  <Text
+                    style={[
+                      styles.cardLabel,
+                      item.discontinuedAt && styles.cardLabelDiscontinued,
+                    ]}
+                    numberOfLines={1}
+                  >
                     {item.label}
                   </Text>
-                  <Text style={styles.cardFrequency}>{formatFrequency(item)}</Text>
+                  <Text style={styles.cardFrequency}>
+                    {item.discontinuedAt
+                      ? `그만 보는 중 · ${formatFrequency(item)}`
+                      : formatFrequency(item)}
+                  </Text>
                 </View>
               </TouchableOpacity>
               {/* ⋯ 버튼 — 메뉴(수정/삭제) 열기. long-press 없이도 발견 가능. */}
@@ -267,30 +325,40 @@ function RoutineListPage() {
             <TouchableWithoutFeedback>
               <View style={styles.confirmContent}>
                 <Text style={styles.confirmTitle}>
-                  {`'${deleteTargetRoutine?.label ?? ''}' 회차를 삭제할까요?`}
+                  {`'${deleteTargetRoutine?.label ?? ''}' 회차를 어떻게 할까요?`}
                 </Text>
-                <Text style={styles.confirmSubtitle}>
-                  이 회차와 관련된 기록도 함께 삭제돼요.
-                </Text>
-                <View style={styles.confirmActions}>
-                  <TouchableOpacity
-                    style={[styles.confirmButton, styles.confirmCancel]}
-                    onPress={() => {
-                      setDeleteConfirmVisible(false);
-                      setDeleteTargetRoutine(null);
-                    }}
-                    accessibilityRole="button"
-                  >
-                    <Text style={styles.confirmCancelText}>닫기</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={[styles.confirmButton, styles.confirmDelete]}
-                    onPress={() => void handleDeleteConfirm()}
-                    accessibilityRole="button"
-                  >
-                    <Text style={styles.confirmDeleteText}>삭제해요</Text>
-                  </TouchableOpacity>
-                </View>
+                <TouchableOpacity
+                  style={styles.discontinueAction}
+                  onPress={() => void handleDiscontinueConfirm()}
+                  accessibilityRole="button"
+                  testID="action-discontinue"
+                >
+                  <Text style={styles.discontinueActionTitle}>오늘부터 그만 보기</Text>
+                  <Text style={styles.discontinueActionSubtitle}>
+                    과거 복약 기록과 통계는 그대로 유지돼요
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.deleteAllAction}
+                  onPress={() => void handleDeleteConfirm()}
+                  accessibilityRole="button"
+                  testID="action-delete-all"
+                >
+                  <Text style={styles.deleteAllActionTitle}>전부 삭제하기</Text>
+                  <Text style={styles.deleteAllActionSubtitle}>
+                    과거 복약 기록까지 모두 사라져요. 통계에 영향이 있어요.
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.deleteCloseAction}
+                  onPress={() => {
+                    setDeleteConfirmVisible(false);
+                    setDeleteTargetRoutine(null);
+                  }}
+                  accessibilityRole="button"
+                >
+                  <Text style={styles.deleteCloseActionText}>닫기</Text>
+                </TouchableOpacity>
               </View>
             </TouchableWithoutFeedback>
           </View>
@@ -418,6 +486,10 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: '#191F28',
   },
+  cardLabelDiscontinued: {
+    color: '#8B95A1',
+    textDecorationLine: 'line-through',
+  },
   cardFrequency: {
     fontSize: 12,
     color: '#6B7684',
@@ -470,7 +542,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#F2F4F6',
   },
 
-  // 삭제 확인
+  // 삭제 확인 (3옵션: 그만 보기 / 전부 삭제 / 닫기)
   confirmContent: {
     width: '100%',
     backgroundColor: '#FFFFFF',
@@ -482,40 +554,52 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '700',
     color: '#191F28',
-    textAlign: 'center',
+    marginBottom: 18,
   },
-  confirmSubtitle: {
+  discontinueAction: {
+    backgroundColor: '#F2F4F6',
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    marginBottom: 10,
+  },
+  discontinueActionTitle: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#191F28',
+  },
+  discontinueActionSubtitle: {
     fontSize: 13,
     color: '#6B7684',
-    marginTop: 8,
-    textAlign: 'center',
+    marginTop: 4,
   },
-  confirmActions: {
-    flexDirection: 'row',
-    marginTop: 20,
-    gap: 8,
+  deleteAllAction: {
+    backgroundColor: '#FFF1F0',
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    marginBottom: 10,
   },
-  confirmButton: {
-    flex: 1,
-    paddingVertical: 12,
-    borderRadius: 10,
+  deleteAllActionTitle: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#F04438',
+  },
+  deleteAllActionSubtitle: {
+    fontSize: 13,
+    color: '#B25344',
+    marginTop: 4,
+  },
+  deleteCloseAction: {
+    paddingVertical: 14,
     alignItems: 'center',
+    minHeight: 48,
+    justifyContent: 'center',
   },
-  confirmCancel: {
-    backgroundColor: '#F2F4F6',
-  },
-  confirmCancelText: {
+  deleteCloseActionText: {
     fontSize: 15,
-    color: '#4E5968',
     fontWeight: '600',
-  },
-  confirmDelete: {
-    backgroundColor: '#F04438',
-  },
-  confirmDeleteText: {
-    fontSize: 15,
-    color: '#FFFFFF',
-    fontWeight: '600',
+    color: '#6B7684',
   },
 
   // 토스트

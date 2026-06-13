@@ -373,7 +373,7 @@ function HomePage() {
     const todayWeekday = getKSTWeekday();
 
     const routines = await getRoutines();
-    const todayRoutines = filterTodayRoutines(routines, todayWeekday);
+    const todayRoutines = filterTodayRoutines(routines, todayWeekday, todayDate);
 
     // 오늘 레코드 조회 (없으면 PENDING 가상 반환)
     const todayItems: RoutineWithRecord[] = await Promise.all(
@@ -786,6 +786,55 @@ function HomePage() {
       await loadTodayItems();
     } catch {
       showToast('삭제에 실패했어요. 다시 시도해요');
+    }
+
+    setDeleteTargetRoutine(null);
+  }
+
+  /**
+   * 오늘부터 그만 보기 — soft delete. 과거 기록 보존.
+   * discontinuedAt = 오늘(KST) 설정 → filterTodayRoutines가 자동 필터.
+   */
+  async function handleDiscontinueConfirm() {
+    if (!deleteTargetRoutine) return;
+    setDeleteConfirmVisible(false);
+
+    try {
+      const todayDate = getKSTDateString();
+      const routines = await getRoutines();
+      const updated = routines.map((r) =>
+        r.id === deleteTargetRoutine.id ? { ...r, discontinuedAt: todayDate } : r,
+      );
+      await Storage.setItem('routines', JSON.stringify(updated));
+
+      // 오늘 PENDING 레코드는 정리 (체크된 건 보존)
+      const records = await getRecords();
+      const updatedRecords = records.filter(
+        (rec) =>
+          !(
+            rec.routineId === deleteTargetRoutine.id &&
+            rec.date === todayDate &&
+            rec.status === 'PENDING'
+          ),
+      );
+      await Storage.setItem('records', JSON.stringify(updatedRecords));
+
+      // Vercel KV 스케줄도 정리 (알림 발사 방지). 실패해도 사용자 흐름엔 영향 없음.
+      void (async () => {
+        try {
+          const userKey = await getSavedUserKey();
+          if (userKey) {
+            await deleteSchedule(deleteTargetRoutine.id, userKey);
+          }
+        } catch (err) {
+          console.warn('[index] 스케줄 삭제 동기화 실패 (재시도 큐 적재됨):', err);
+        }
+      })();
+
+      showToast('오늘부터 안 보여요. 과거 기록은 보존돼요');
+      await loadTodayItems();
+    } catch {
+      showToast('처리에 실패했어요. 다시 시도해요');
     }
 
     setDeleteTargetRoutine(null);
@@ -1411,27 +1460,41 @@ function HomePage() {
           <View style={styles.menuOverlay}>
             <TouchableWithoutFeedback>
               <View style={styles.deleteSheet} testID="delete-confirm-sheet">
-                <Text style={styles.deleteTitle}>이 회차를 삭제할까요?</Text>
-                <Text style={styles.deleteBody}>
-                  {deleteTargetRoutine?.label} 회차와 복약 기록이 삭제돼요
+                <Text style={styles.deleteTitle}>
+                  {`'${deleteTargetRoutine?.label ?? ''}' 회차를 어떻게 할까요?`}
                 </Text>
-                <View style={styles.deleteButtons}>
-                  {/* 왼쪽: 닫기 */}
-                  <TouchableOpacity
-                    style={[styles.deleteButton, styles.deleteButtonClose]}
-                    onPress={() => setDeleteConfirmVisible(false)}
-                    accessibilityRole="button"
-                  >
-                    <Text style={styles.deleteButtonCloseText}>닫기</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={[styles.deleteButton, styles.deleteButtonConfirm]}
-                    onPress={() => void handleDeleteConfirm()}
-                    accessibilityRole="button"
-                  >
-                    <Text style={styles.deleteButtonConfirmText}>삭제해요</Text>
-                  </TouchableOpacity>
-                </View>
+                {/* 오늘부터 그만 보기 (권장) */}
+                <TouchableOpacity
+                  style={styles.discontinueAction}
+                  onPress={() => void handleDiscontinueConfirm()}
+                  accessibilityRole="button"
+                  testID="action-discontinue"
+                >
+                  <Text style={styles.discontinueActionTitle}>오늘부터 그만 보기</Text>
+                  <Text style={styles.discontinueActionSubtitle}>
+                    과거 복약 기록과 통계는 그대로 유지돼요
+                  </Text>
+                </TouchableOpacity>
+                {/* 전부 삭제 — 위험 */}
+                <TouchableOpacity
+                  style={styles.deleteAllAction}
+                  onPress={() => void handleDeleteConfirm()}
+                  accessibilityRole="button"
+                  testID="action-delete-all"
+                >
+                  <Text style={styles.deleteAllActionTitle}>전부 삭제하기</Text>
+                  <Text style={styles.deleteAllActionSubtitle}>
+                    과거 복약 기록까지 모두 사라져요. 통계에 영향이 있어요.
+                  </Text>
+                </TouchableOpacity>
+                {/* 닫기 */}
+                <TouchableOpacity
+                  style={styles.deleteCloseAction}
+                  onPress={() => setDeleteConfirmVisible(false)}
+                  accessibilityRole="button"
+                >
+                  <Text style={styles.deleteCloseActionText}>닫기</Text>
+                </TouchableOpacity>
               </View>
             </TouchableWithoutFeedback>
           </View>
@@ -2220,43 +2283,55 @@ const styles = StyleSheet.create({
     paddingBottom: Platform.OS === 'ios' ? 40 : 28,
   },
   deleteTitle: {
-    fontSize: 18,
+    fontSize: 17,
     fontWeight: '700',
     color: '#191F28',
-    marginBottom: 8,
+    marginBottom: 18,
   },
-  deleteBody: {
-    fontSize: 15,
-    color: '#6B7684',
-    marginBottom: 28,
-  },
-  deleteButtons: {
-    flexDirection: 'row',
-    gap: 12,
-  },
-  deleteButton: {
-    flex: 1,
-    height: 52,
-    borderRadius: 10,
-    alignItems: 'center',
-    justifyContent: 'center',
-    minHeight: 52,
-  },
-  deleteButtonClose: {
+  discontinueAction: {
     backgroundColor: '#F2F4F6',
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    marginBottom: 10,
   },
-  deleteButtonConfirm: {
-    backgroundColor: '#FF6B6B',
+  discontinueActionTitle: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#191F28',
   },
-  deleteButtonCloseText: {
-    fontSize: 16,
+  discontinueActionSubtitle: {
+    fontSize: 13,
+    color: '#6B7684',
+    marginTop: 4,
+  },
+  deleteAllAction: {
+    backgroundColor: '#FFF1F0',
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    marginBottom: 10,
+  },
+  deleteAllActionTitle: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#F04438',
+  },
+  deleteAllActionSubtitle: {
+    fontSize: 13,
+    color: '#B25344',
+    marginTop: 4,
+  },
+  deleteCloseAction: {
+    paddingVertical: 14,
+    alignItems: 'center',
+    minHeight: 48,
+    justifyContent: 'center',
+  },
+  deleteCloseActionText: {
+    fontSize: 15,
     fontWeight: '600',
-    color: '#4E5968',
-  },
-  deleteButtonConfirmText: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#FFFFFF',
+    color: '#6B7684',
   },
 
   // ── Step 6: 복약률 카드 ──────────────────────────────────────────────────
