@@ -906,23 +906,25 @@ function HomePage() {
                 </Text>
               )
             ) : (
-              totalCount > 0 && (
-                <View style={styles.headerSubtitleRow}>
-                  <Text style={styles.headerSubtitle}>
-                    {`${totalCount}개 중 ${checkedCount}개 체크`}
-                  </Text>
-                  <Text style={styles.headerSubtitleDot}>·</Text>
-                  <TouchableOpacity
-                    onPress={() => navigation.navigate('/routines/list')}
-                    accessibilityRole="button"
-                    accessibilityLabel="전체 회차 보기"
-                    testID="header-view-all-routines"
-                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                  >
-                    <Text style={styles.headerLinkText}>전체 보기</Text>
-                  </TouchableOpacity>
-                </View>
-              )
+              <View style={styles.headerSubtitleRow}>
+                {totalCount > 0 && (
+                  <>
+                    <Text style={styles.headerSubtitle}>
+                      {`${totalCount}개 중 ${checkedCount}개 체크`}
+                    </Text>
+                    <Text style={styles.headerSubtitleDot}>·</Text>
+                  </>
+                )}
+                <TouchableOpacity
+                  onPress={() => navigation.navigate('/routines/list')}
+                  accessibilityRole="button"
+                  accessibilityLabel="전체 회차 보기"
+                  testID="header-view-all-routines"
+                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                >
+                  <Text style={styles.headerLinkText}>전체 보기</Text>
+                </TouchableOpacity>
+              </View>
             )}
           </TouchableOpacity>
 

@@ -4,17 +4,25 @@
  * 홈은 '오늘 복약'만 보여주므로, 주간 회차가 오늘 요일을 포함하지 않으면
  * 홈에서 사라져 보임. 사용자가 다음 도래 요일을 기다리지 않고도 회차를
  * 손볼 수 있게 별도 진입점 제공.
+ *
+ * 길게 누르기 → 수정·삭제 메뉴 (홈과 동일 패턴).
  */
+import { Storage } from '@apps-in-toss/framework';
 import { createRoute, useNavigation } from '@granite-js/react-native';
 import React, { useCallback, useEffect, useState } from 'react';
 import {
   FlatList,
+  Modal,
   StyleSheet,
   Text,
   TouchableOpacity,
+  TouchableWithoutFeedback,
   View,
 } from 'react-native';
 import { getRoutines } from '../../services/storageService';
+import { getRecords } from '../../services/recordService';
+import { deleteSchedule } from '../../services/scheduleService';
+import { getSavedUserKey } from '../../services/authService';
 import type { DoseRoutine } from '../../types/routine';
 import { WEEKDAY_LABELS, MEAL_TIMING_LABELS } from '../../types/routine';
 
@@ -41,6 +49,20 @@ function RoutineListPage() {
   const [routines, setRoutines] = useState<DoseRoutine[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
+  // 길게 누르기 메뉴 + 삭제 확인 (홈과 동일 패턴)
+  const [menuVisible, setMenuVisible] = useState(false);
+  const [menuRoutine, setMenuRoutine] = useState<DoseRoutine | null>(null);
+  const [deleteConfirmVisible, setDeleteConfirmVisible] = useState(false);
+  const [deleteTargetRoutine, setDeleteTargetRoutine] = useState<DoseRoutine | null>(null);
+
+  // 토스트
+  const [toastMessage, setToastMessage] = useState('');
+
+  function showToast(message: string) {
+    setToastMessage(message);
+    setTimeout(() => setToastMessage(''), 2500);
+  }
+
   const load = useCallback(async () => {
     setIsLoading(true);
     try {
@@ -60,12 +82,67 @@ function RoutineListPage() {
     navigation.navigate('/routines/add', { routineId: routine.id });
   }
 
+  function handleLongPress(routine: DoseRoutine) {
+    setMenuRoutine(routine);
+    setMenuVisible(true);
+  }
+
+  function handleMenuEdit() {
+    setMenuVisible(false);
+    if (!menuRoutine) return;
+    navigation.navigate('/routines/add', { routineId: menuRoutine.id });
+  }
+
+  function handleMenuDelete() {
+    setMenuVisible(false);
+    if (!menuRoutine) return;
+    setDeleteTargetRoutine(menuRoutine);
+    setDeleteConfirmVisible(true);
+  }
+
+  async function handleDeleteConfirm() {
+    if (!deleteTargetRoutine) return;
+    setDeleteConfirmVisible(false);
+
+    try {
+      const all = await getRoutines();
+      const updated = all.filter((r) => r.id !== deleteTargetRoutine.id);
+      await Storage.setItem('routines', JSON.stringify(updated));
+
+      // 해당 루틴의 레코드도 제거 (홈과 동일)
+      const records = await getRecords();
+      const updatedRecords = records.filter(
+        (rec) => rec.routineId !== deleteTargetRoutine.id,
+      );
+      await Storage.setItem('records', JSON.stringify(updatedRecords));
+
+      // Vercel KV 스케줄도 백그라운드 삭제
+      void (async () => {
+        try {
+          const userKey = await getSavedUserKey();
+          if (userKey) {
+            await deleteSchedule(deleteTargetRoutine.id, userKey);
+          }
+        } catch (err) {
+          console.warn('[list] 스케줄 삭제 동기화 실패 (재시도 큐 적재됨):', err);
+        }
+      })();
+
+      showToast('회차를 삭제했어요');
+      await load();
+    } catch {
+      showToast('삭제에 실패했어요. 다시 시도해요');
+    }
+
+    setDeleteTargetRoutine(null);
+  }
+
   return (
     <View style={styles.container} testID="routine-list-page">
       <View style={styles.header}>
         <Text style={styles.headerTitle}>전체 회차</Text>
         <Text style={styles.headerSubtitle}>
-          탭하면 회차를 수정할 수 있어요
+          탭하면 수정해요. 길게 눌러서 삭제할 수 있어요.
         </Text>
       </View>
 
@@ -95,6 +172,7 @@ function RoutineListPage() {
             <TouchableOpacity
               style={styles.card}
               onPress={() => handleEdit(item)}
+              onLongPress={() => handleLongPress(item)}
               accessibilityRole="button"
               accessibilityLabel={`${item.label} 회차 수정`}
               testID={`routine-list-item-${item.id}`}
@@ -118,6 +196,102 @@ function RoutineListPage() {
           )}
         />
       )}
+
+      {/* 길게 누르기 메뉴 — 홈과 동일 다크패턴 방지 패턴 */}
+      <Modal
+        visible={menuVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setMenuVisible(false)}
+        testID="long-press-menu-modal"
+      >
+        <TouchableWithoutFeedback onPress={() => setMenuVisible(false)}>
+          <View style={styles.menuOverlay}>
+            <TouchableWithoutFeedback>
+              <View style={styles.menuContent}>
+                <Text style={styles.menuTitle} numberOfLines={1}>
+                  {menuRoutine?.label ?? ''}
+                </Text>
+                <TouchableOpacity
+                  style={styles.menuItem}
+                  onPress={handleMenuEdit}
+                  accessibilityRole="button"
+                >
+                  <Text style={styles.menuItemText}>수정해요</Text>
+                </TouchableOpacity>
+                <View style={styles.menuDivider} />
+                <TouchableOpacity
+                  style={styles.menuItem}
+                  onPress={handleMenuDelete}
+                  accessibilityRole="button"
+                >
+                  <Text style={[styles.menuItemText, styles.menuItemDelete]}>
+                    삭제해요
+                  </Text>
+                </TouchableOpacity>
+                <View style={styles.menuDivider} />
+                <TouchableOpacity
+                  style={styles.menuItem}
+                  onPress={() => setMenuVisible(false)}
+                  accessibilityRole="button"
+                >
+                  <Text style={styles.menuItemClose}>닫기</Text>
+                </TouchableOpacity>
+              </View>
+            </TouchableWithoutFeedback>
+          </View>
+        </TouchableWithoutFeedback>
+      </Modal>
+
+      {/* 삭제 확인 */}
+      <Modal
+        visible={deleteConfirmVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setDeleteConfirmVisible(false)}
+        testID="delete-confirm-modal"
+      >
+        <TouchableWithoutFeedback onPress={() => setDeleteConfirmVisible(false)}>
+          <View style={styles.menuOverlay}>
+            <TouchableWithoutFeedback>
+              <View style={styles.confirmContent}>
+                <Text style={styles.confirmTitle}>
+                  {`'${deleteTargetRoutine?.label ?? ''}' 회차를 삭제할까요?`}
+                </Text>
+                <Text style={styles.confirmSubtitle}>
+                  이 회차와 관련된 기록도 함께 삭제돼요.
+                </Text>
+                <View style={styles.confirmActions}>
+                  <TouchableOpacity
+                    style={[styles.confirmButton, styles.confirmCancel]}
+                    onPress={() => {
+                      setDeleteConfirmVisible(false);
+                      setDeleteTargetRoutine(null);
+                    }}
+                    accessibilityRole="button"
+                  >
+                    <Text style={styles.confirmCancelText}>닫기</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.confirmButton, styles.confirmDelete]}
+                    onPress={() => void handleDeleteConfirm()}
+                    accessibilityRole="button"
+                  >
+                    <Text style={styles.confirmDeleteText}>삭제해요</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            </TouchableWithoutFeedback>
+          </View>
+        </TouchableWithoutFeedback>
+      </Modal>
+
+      {/* 토스트 */}
+      {toastMessage ? (
+        <View style={styles.toast} pointerEvents="none">
+          <Text style={styles.toastText}>{toastMessage}</Text>
+        </View>
+      ) : null}
     </View>
   );
 }
@@ -224,5 +398,115 @@ const styles = StyleSheet.create({
     fontSize: 20,
     color: '#B0B8C1',
     marginLeft: 8,
+  },
+
+  // 메뉴 모달
+  menuOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.4)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 32,
+  },
+  menuContent: {
+    width: '100%',
+    backgroundColor: '#FFFFFF',
+    borderRadius: 14,
+    paddingVertical: 8,
+  },
+  menuTitle: {
+    fontSize: 13,
+    color: '#8B95A1',
+    fontWeight: '600',
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    textAlign: 'center',
+  },
+  menuItem: {
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    minHeight: 48,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  menuItemText: {
+    fontSize: 16,
+    color: '#191F28',
+    fontWeight: '500',
+  },
+  menuItemDelete: {
+    color: '#F04438',
+  },
+  menuItemClose: {
+    fontSize: 16,
+    color: '#6B7684',
+    fontWeight: '500',
+  },
+  menuDivider: {
+    height: 1,
+    backgroundColor: '#F2F4F6',
+  },
+
+  // 삭제 확인
+  confirmContent: {
+    width: '100%',
+    backgroundColor: '#FFFFFF',
+    borderRadius: 14,
+    paddingHorizontal: 20,
+    paddingVertical: 22,
+  },
+  confirmTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#191F28',
+    textAlign: 'center',
+  },
+  confirmSubtitle: {
+    fontSize: 13,
+    color: '#6B7684',
+    marginTop: 8,
+    textAlign: 'center',
+  },
+  confirmActions: {
+    flexDirection: 'row',
+    marginTop: 20,
+    gap: 8,
+  },
+  confirmButton: {
+    flex: 1,
+    paddingVertical: 12,
+    borderRadius: 10,
+    alignItems: 'center',
+  },
+  confirmCancel: {
+    backgroundColor: '#F2F4F6',
+  },
+  confirmCancelText: {
+    fontSize: 15,
+    color: '#4E5968',
+    fontWeight: '600',
+  },
+  confirmDelete: {
+    backgroundColor: '#F04438',
+  },
+  confirmDeleteText: {
+    fontSize: 15,
+    color: '#FFFFFF',
+    fontWeight: '600',
+  },
+
+  // 토스트
+  toast: {
+    position: 'absolute',
+    bottom: 80,
+    alignSelf: 'center',
+    backgroundColor: 'rgba(25, 31, 40, 0.92)',
+    paddingHorizontal: 18,
+    paddingVertical: 10,
+    borderRadius: 24,
+  },
+  toastText: {
+    color: '#FFFFFF',
+    fontSize: 14,
   },
 });

@@ -1,0 +1,115 @@
+/**
+ * POST /api/auth/exchange
+ *
+ * Ref:
+ *  - references/sdk/framework/로그인/appLogin.md
+ *    "인가 코드를 받은 뒤의 토큰 교환은 반드시 서버에서 처리"
+ *  - references/dev-guide/login/develop.md §토큰 교환 API
+ *    POST /api-partner/v1/apps-in-toss/user/oauth2/generate-token
+ *
+ * 앱에서 받은 authorizationCode를 Toss 서버로 전송 → accessToken + userKey 획득.
+ * mTLS 인증서 사용.
+ *
+ * 주의: Vercel runtime의 fetch(undici)는 agent 옵션을 무시·throw함. mTLS를
+ * 거는 유일한 안정 경로는 native https.request. 이전 fetch+agent 방식이
+ * silent fail 또는 throw → 500 원인이었음.
+ */
+import type { VercelRequest, VercelResponse } from '@vercel/node';
+import https from 'https';
+
+const TOSS_API_HOST = 'apps-in-toss-api.toss.im';
+const TOSS_API_PATH = '/api-partner/v1/apps-in-toss/user/oauth2/generate-token';
+
+type TossTokenResponse = {
+  userKey?: string;
+  accessToken?: string;
+};
+
+function postWithMtls(
+  body: string,
+  cert: string,
+  key: string,
+): Promise<{ status: number; body: string }> {
+  return new Promise((resolve, reject) => {
+    const req = https.request(
+      {
+        host: TOSS_API_HOST,
+        path: TOSS_API_PATH,
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Content-Length': Buffer.byteLength(body).toString(),
+        },
+        cert,
+        key,
+      },
+      (response) => {
+        const chunks: Buffer[] = [];
+        response.on('data', (chunk: Buffer) => chunks.push(chunk));
+        response.on('end', () => {
+          resolve({
+            status: response.statusCode ?? 0,
+            body: Buffer.concat(chunks).toString('utf8'),
+          });
+        });
+      },
+    );
+    req.on('error', reject);
+    req.write(body);
+    req.end();
+  });
+}
+
+export default async function handler(req: VercelRequest, res: VercelResponse) {
+  if (req.method !== 'POST') {
+    return res.status(405).json({ error: 'Method Not Allowed' });
+  }
+
+  const { authorizationCode, referrer } = req.body as {
+    authorizationCode?: string;
+    referrer?: string;
+  };
+
+  if (!authorizationCode) {
+    return res.status(400).json({ error: 'authorizationCode required' });
+  }
+
+  const cert = process.env.TOSS_MTLS_CERT;
+  const key = process.env.TOSS_MTLS_KEY;
+
+  if (!cert || !key) {
+    console.warn('[auth/exchange] TOSS_MTLS_CERT 또는 TOSS_MTLS_KEY 미설정');
+    return res.status(503).json({ error: 'mTLS 인증서 미설정' });
+  }
+
+  try {
+    const { status, body } = await postWithMtls(
+      JSON.stringify({ authorizationCode, referrer }),
+      cert,
+      key,
+    );
+
+    if (status < 200 || status >= 300) {
+      console.error('[auth/exchange] 토큰 교환 실패:', status, body);
+      return res.status(502).json({ error: '토큰 교환 실패', status });
+    }
+
+    let data: TossTokenResponse;
+    try {
+      data = JSON.parse(body) as TossTokenResponse;
+    } catch {
+      console.error('[auth/exchange] 응답 JSON 파싱 실패:', body);
+      return res.status(502).json({ error: '응답 파싱 실패' });
+    }
+
+    if (!data.userKey) {
+      return res.status(502).json({ error: 'userKey 미포함 응답' });
+    }
+
+    return res.status(200).json({ userKey: data.userKey });
+  } catch (err) {
+    console.error('[auth/exchange] 예외:', err);
+    const message = err instanceof Error ? err.message : String(err);
+    return res.status(500).json({ error: 'Internal Server Error', detail: message });
+  }
+}
