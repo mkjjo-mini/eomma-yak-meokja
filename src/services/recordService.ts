@@ -466,6 +466,8 @@ export function calcMonthlyAdherenceWithSchedule(
     const dayRoutines = routines.filter((r) => {
       const createdDateKst = getKSTDateString(new Date(r.createdAt));
       if (dateStr < createdDateKst) return false;
+      // 그만 보기 처리된 회차: 그 날짜부터 예정에서 제외 (미복용 카운팅 X)
+      if (r.discontinuedAt && dateStr >= r.discontinuedAt) return false;
       if (r.frequency === 'daily') return true;
       if (r.frequency === 'weekly') return r.weekdays?.includes(prdWeekday) ?? false;
       return false;
@@ -534,6 +536,8 @@ export function calcThisMonthFullCheckedDays(
     const dayRoutines = routines.filter((r) => {
       const createdDateKst = getKSTDateString(new Date(r.createdAt));
       if (dateStr < createdDateKst) return false;
+      // 그만 보기 처리된 회차는 그 날짜부터 예정에서 제외
+      if (r.discontinuedAt && dateStr >= r.discontinuedAt) return false;
       if (r.frequency === 'daily') return true;
       if (r.frequency === 'weekly') return r.weekdays?.includes(prdWeekday) ?? false;
       return false;
@@ -649,6 +653,8 @@ export function calcStreak(
     return routines.filter((r) => {
       const createdDateKst = kstDateOf(new Date(r.createdAt));
       if (dateStr < createdDateKst) return false;
+      // 그만 보기 처리된 회차는 그 날짜부터 스트릭 판정에서 제외
+      if (r.discontinuedAt && dateStr >= r.discontinuedAt) return false;
       if (r.frequency === 'daily') return true;
       if (r.frequency === 'weekly') return r.weekdays?.includes(weekday) ?? false;
       return false;
