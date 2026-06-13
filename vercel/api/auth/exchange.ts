@@ -21,16 +21,17 @@ const TOSS_API_HOST = 'apps-in-toss-api.toss.im';
 const TOSS_API_PATH = '/api-partner/v1/apps-in-toss/user/oauth2/generate-token';
 
 /**
- * Toss 토큰 교환 응답 — 가능한 shape 둘 다 처리.
- *  - 평면: { userKey, accessToken }
- *  - 래핑: { data: { userKey, accessToken }, code, message } (Toss 공통 API 패턴)
+ * Toss 토큰 교환 응답 — 실제 응답 shape (실장비 진단으로 확인됨).
+ *  - 성공: { resultType: 'SUCCESS', success: { userKey, accessToken }, error: null }
+ *  - 실패: { resultType: 'FAIL', success: null, error: { errorCode, reason, ... } }
  */
 type TossTokenResponse = {
+  resultType?: 'SUCCESS' | 'FAIL';
+  success?: { userKey?: string; accessToken?: string } | null;
+  error?: { errorCode?: string; reason?: string } | null;
+  // 호환: 혹시 평면으로 변경될 가능성 대비
   userKey?: string;
   accessToken?: string;
-  data?: { userKey?: string; accessToken?: string };
-  code?: string;
-  message?: string;
 };
 
 function postWithMtls(
@@ -110,8 +111,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(502).json({ error: '응답 파싱 실패', rawBody: body.slice(0, 500) });
     }
 
-    // 평면·래핑 shape 모두 처리
-    const userKey = data.userKey ?? data.data?.userKey;
+    // resultType=FAIL이면 reason을 그대로 detail로 surface
+    if (data.resultType === 'FAIL') {
+      const reason = data.error?.reason ?? data.error?.errorCode ?? '알 수 없는 오류';
+      console.error('[auth/exchange] Toss FAIL:', reason);
+      return res.status(502).json({
+        error: '토큰 교환 거절',
+        rawBody: reason.slice(0, 500),
+      });
+    }
+
+    // SUCCESS shape (success.userKey) 우선, 호환 위해 평면 userKey도 fallback
+    const userKey = data.success?.userKey ?? data.userKey;
 
     if (!userKey) {
       console.error('[auth/exchange] userKey 미포함 응답:', body);
