@@ -52,7 +52,9 @@ function userKeyFailureMessage(
     case 'login_failed':
       return `토스 로그인에 실패했어요: ${result.reason}`;
     case 'exchange_failed':
-      return `서버 인증에 실패했어요 (${result.status}). 잠시 후 다시 시도해주세요.`;
+      return result.detail
+        ? `서버 인증에 실패했어요 (${result.status}): ${result.detail}`
+        : `서버 인증에 실패했어요 (${result.status}). 잠시 후 다시 시도해주세요.`;
     case 'no_user_key_in_response':
       return '계정 정보를 가져오지 못했어요. 잠시 후 다시 시도해주세요.';
     case 'ok':

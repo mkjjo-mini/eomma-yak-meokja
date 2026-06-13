@@ -20,9 +20,17 @@ import https from 'https';
 const TOSS_API_HOST = 'apps-in-toss-api.toss.im';
 const TOSS_API_PATH = '/api-partner/v1/apps-in-toss/user/oauth2/generate-token';
 
+/**
+ * Toss 토큰 교환 응답 — 가능한 shape 둘 다 처리.
+ *  - 평면: { userKey, accessToken }
+ *  - 래핑: { data: { userKey, accessToken }, code, message } (Toss 공통 API 패턴)
+ */
 type TossTokenResponse = {
   userKey?: string;
   accessToken?: string;
+  data?: { userKey?: string; accessToken?: string };
+  code?: string;
+  message?: string;
 };
 
 function postWithMtls(
@@ -99,14 +107,21 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       data = JSON.parse(body) as TossTokenResponse;
     } catch {
       console.error('[auth/exchange] 응답 JSON 파싱 실패:', body);
-      return res.status(502).json({ error: '응답 파싱 실패' });
+      return res.status(502).json({ error: '응답 파싱 실패', rawBody: body.slice(0, 500) });
     }
 
-    if (!data.userKey) {
-      return res.status(502).json({ error: 'userKey 미포함 응답' });
+    // 평면·래핑 shape 모두 처리
+    const userKey = data.userKey ?? data.data?.userKey;
+
+    if (!userKey) {
+      console.error('[auth/exchange] userKey 미포함 응답:', body);
+      return res.status(502).json({
+        error: 'userKey 미포함 응답',
+        rawBody: body.slice(0, 500),
+      });
     }
 
-    return res.status(200).json({ userKey: data.userKey });
+    return res.status(200).json({ userKey });
   } catch (err) {
     console.error('[auth/exchange] 예외:', err);
     const message = err instanceof Error ? err.message : String(err);

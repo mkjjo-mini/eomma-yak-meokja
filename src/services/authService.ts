@@ -142,7 +142,7 @@ export type EnsureUserKeyResult =
   | { kind: 'unsupported' }
   | { kind: 'no_api_url' }
   | { kind: 'login_failed'; reason: string }
-  | { kind: 'exchange_failed'; status: number }
+  | { kind: 'exchange_failed'; status: number; detail?: string }
   | { kind: 'no_user_key_in_response' };
 
 /**
@@ -170,7 +170,17 @@ export async function ensureUserKeyWithDetails(): Promise<EnsureUserKeyResult> {
     });
 
     if (!response.ok) {
-      return { kind: 'exchange_failed', status: response.status };
+      // 디버깅용: 백엔드가 rawBody·error를 응답에 담아 보내므로 surface.
+      let detail: string | undefined;
+      try {
+        const errJson = (await response.json()) as { error?: string; rawBody?: string };
+        detail = errJson.rawBody
+          ? `${errJson.error ?? ''}: ${errJson.rawBody}`.slice(0, 300)
+          : errJson.error;
+      } catch {
+        // ignore
+      }
+      return { kind: 'exchange_failed', status: response.status, detail };
     }
 
     const data = (await response.json()) as { userKey?: string };
